@@ -44,6 +44,18 @@ func Open(ctx context.Context, dataDir string) (*Store, error) {
 	return s, nil
 }
 
+// Size returns the database's size on disk in bytes, including the
+// write-ahead log.
+func (s *Store) Size() int64 {
+	var total int64
+	for _, name := range []string{"node.db", "node.db-wal"} {
+		if fi, err := os.Stat(filepath.Join(s.Dir, name)); err == nil {
+			total += fi.Size()
+		}
+	}
+	return total
+}
+
 // Close closes the database.
 func (s *Store) Close() error { return s.DB.Close() }
 

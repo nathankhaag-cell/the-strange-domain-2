@@ -23,7 +23,13 @@ module.exports = {
   files: ["src/**/*", "build/icon.png", "package.json"],
   asar: true,
   artifactName: "The-Strange-Domain-${version}-${os}-${arch}.${ext}",
-  publish: null,
+  // Where the app looks for updates (src/updates.js). electron-builder
+  // writes latest.yml (Windows), latest-linux.yml / latest-linux-arm64.yml
+  // (AppImage) and latest-mac.yml next to the installers, and bakes this
+  // into the app as app-update.yml. It never uploads anything itself
+  // (`--publish never`): the release workflow uploads the installers and
+  // those .yml files to the GitHub Release.
+  publish: [{ provider: "github", owner: "nathankhaag-cell", repo: "the-strange-domain-2", releaseType: "release" }],
 
   win: {
     target: [{ target: "nsis", arch: ["x64"] }],

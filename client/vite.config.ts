@@ -13,6 +13,9 @@ import { defineConfig, type Plugin } from "vite";
 const APP_CSP =
   "default-src 'self'; img-src 'self' blob:; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'none'; form-action 'none'";
 
+// Vite runs this file in Node; the client's tsconfig has no Node types.
+declare const process: { env: Record<string, string | undefined> };
+
 function appCsp(): Plugin {
   return {
     name: "app-csp",
@@ -23,6 +26,10 @@ function appCsp(): Plugin {
 
 export default defineConfig(({ mode }) => ({
   esbuild: { jsx: "automatic", jsxImportSource: "preact" },
+  // The phone app's version, for its update check (src/ui/AppUpdate.tsx).
+  // The release workflow sets APP_VERSION; the node's build leaves it empty
+  // so that build stays reproducible.
+  define: { __APP_VERSION__: JSON.stringify(mode === "app" ? (process.env.APP_VERSION ?? "dev") : "") },
   plugins: mode === "app" ? [appCsp()] : [],
   build: {
     outDir: mode === "app" ? "../mobile/www" : "../internal/server/web", // relative to this folder

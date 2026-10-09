@@ -18,7 +18,7 @@ import { Modal, errText } from "./common";
 import { Avatar } from "./Media";
 import { Lock } from "./icons";
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+export function SettingsModal({ onClose, onNodeAdmin }: { onClose: () => void; onNodeAdmin?: () => void }) {
   const app = useApp();
   const prefs = app.notifyPrefs;
   const [perm, setPerm] = useState<Permission>("default");
@@ -96,6 +96,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <button type="button" class="btn-small" onClick={() => void signOut()}>
             Sign out
           </button>
+          {app.me?.is_node_admin && onNodeAdmin && (
+            <button type="button" class="btn-small" onClick={onNodeAdmin}>
+              Node admin
+            </button>
+          )}
         </div>
       </div>
     </Modal>

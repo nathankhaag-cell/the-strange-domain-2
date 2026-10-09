@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/server"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/tlsutil"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/update"
 )
 
 type options struct {
@@ -34,10 +36,14 @@ type options struct {
 	tlsSelfSigned bool
 	maxUploadMB   int64
 	uploadQuotaMB int64
+
+	statusInterval time.Duration // 0: no status line
+	updateCheck    bool
+	out            io.Writer // start-up summary; nil: none
 }
 
 func main() {
-	var o options
+	o := options{out: os.Stdout}
 	flag.StringVar(&o.listen, "listen", ":8743", "address to listen on")
 	flag.StringVar(&o.dataDir, "data", defaultDataDir(), "directory for the node's database and files")
 	flag.StringVar(&o.tlsCert, "tls-cert", "", "serve HTTPS with this certificate (PEM file; needs -tls-key)")
@@ -46,6 +52,9 @@ func main() {
 	flag.StringVar(&o.tlsListen, "tls-listen", "", "with a TLS option: serve HTTPS on this address and keep plain HTTP on -listen (for example :8744)")
 	flag.Int64Var(&o.maxUploadMB, "max-upload-mb", 25, "largest attachment people can send, in MB")
 	flag.Int64Var(&o.uploadQuotaMB, "upload-quota-mb", 1024, "attachment storage each person may use on this node, in MB")
+	flag.DurationVar(&o.statusInterval, "status-interval", time.Minute, "log a one-line traffic summary this often (0 turns it off)")
+	flag.BoolVar(&o.updateCheck, "update-check", true, "check GitHub for a newer release at start-up and once a day (needs internet; failures are ignored)")
+	logLevel := flag.String("log-level", "info", "log detail: debug (also logs every request), info, warn or error")
 	version := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -53,6 +62,12 @@ func main() {
 		fmt.Println(server.Version)
 		return
 	}
+	level, err := parseLevel(*logLevel)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "-log-level must be debug, info, warn or error")
+		os.Exit(2)
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, o, nil); err != nil {
@@ -105,6 +120,11 @@ func run(ctx context.Context, o options, ready func(httpAddr, httpsAddr net.Addr
 	hub := relay.NewHub()
 	handler := server.New(st, dom, auth.NewService(st, dom), relay.NewService(st, hub), hub,
 		server.WithUploadLimits(o.maxUploadMB<<20, o.uploadQuotaMB<<20))
+	var updates *update.Checker
+	if o.updateCheck {
+		updates = &update.Checker{Current: server.Version}
+		handler.SetUpdateChecker(updates)
+	}
 
 	// Plain HTTP on -listen, unless TLS is on without -tls-listen, in which
 	// case -listen serves HTTPS only.
@@ -141,16 +161,35 @@ func run(ctx context.Context, o options, ready func(httpAddr, httpsAddr net.Addr
 		go func() { errc <- srv.Serve(ln) }()
 	}
 	var ha, hsa net.Addr
+	var lns []listener
 	if httpLn != nil {
 		serve(httpLn, "http")
 		ha = httpLn.Addr()
+		lns = append(lns, listener{"http", ha})
 	}
 	if httpsLn != nil {
 		serve(httpsLn, "https")
 		hsa = httpsLn.Addr()
+		lns = append(lns, listener{"https", hsa})
+	}
+	if o.out != nil {
+		fingerprint := ""
+		if o.tlsSelfSigned && tlsCfg != nil && len(tlsCfg.Certificates) > 0 {
+			fingerprint = tlsutil.Fingerprint(tlsCfg.Certificates[0].Certificate[0])
+		}
+		printBanner(o.out, o.dataDir, lns, fingerprint)
 	}
 	if ready != nil {
 		ready(ha, hsa)
+	}
+
+	bg, stopBg := context.WithCancel(ctx)
+	defer stopBg()
+	if updates != nil && updates.Enabled() {
+		go updates.Run(bg, 24*time.Hour)
+	}
+	if o.statusInterval > 0 {
+		go statusLoop(bg, handler, o.statusInterval)
 	}
 
 	var runErr error

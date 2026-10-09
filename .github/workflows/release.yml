@@ -164,10 +164,14 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
           FLAG: ${{ matrix.flag }}
         run: npm run dist -- "$FLAG" "-c.extraMetadata.version=$VERSION"
-      - name: Collect installers
+      # latest*.yml (latest.yml, latest-linux.yml, latest-linux-arm64.yml,
+      # latest-mac.yml when electron-builder writes one) tell installed apps
+      # that an update exists (desktop/src/updates.js); the .blockmap files
+      # let the Windows installer download only what changed.
+      - name: Collect installers and update metadata
         run: |
           mkdir -p ../out
-          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/*.deb; do
+          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/*.deb dist/*.blockmap dist/latest*.yml; do
             if [ -e "$f" ]; then cp "$f" ../out/; fi
           done
           ls -l ../out
@@ -195,6 +199,9 @@ jobs:
           java-version: "21"
       - name: Build the client for the app
         working-directory: client
+        env:
+          # The app compares this with GitHub's latest release on start.
+          APP_VERSION: ${{ needs.version.outputs.version }}
         run: |
           npm ci
           npm run build:app

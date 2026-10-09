@@ -25,6 +25,7 @@ import { Lock, MenuIcon, Paperclip, RoleIcon, Speaker } from "./icons";
 import { fmtSize } from "../files";
 import { Attachments, Avatar } from "./Media";
 import { SettingsModal } from "./Settings";
+import { NodeAdmin } from "./NodeAdmin";
 import { actorFor, canActOn, has, roleBadge } from "./perms";
 import {
   AddDomainModal,
@@ -54,6 +55,7 @@ export function Main() {
   const app = useApp();
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [drawer, setDrawer] = useState<Drawer>(null);
+  const [nodeAdmin, setNodeAdmin] = useState(false);
   const close = () => setModal(null);
   const touch = useRef<{ x: number; y: number } | null>(null);
   const phone = useMedia("(max-width: 720px)");
@@ -122,10 +124,16 @@ export function Main() {
         <button type="button" class="btn-small" aria-pressed={!app.effects} onClick={() => setEffects(!app.effects)}>
           {app.effects ? "Reduce effects" : "Effects off"}
         </button>
+        {app.me?.is_node_admin && (
+          <button type="button" class="btn-small" onClick={() => setNodeAdmin(true)}>
+            Node admin
+          </button>
+        )}
         <button type="button" class="btn-small" onClick={() => void signOut()}>
           Sign out
         </button>
       </header>
+      {nodeAdmin && <NodeAdmin onClose={() => setNodeAdmin(false)} />}
 
       {BUNDLED && compatStatus(app.info) !== "ok" && (
         <div class="banner" role="status">
@@ -251,7 +259,7 @@ export function Main() {
       {modal?.kind === "summons" && domain && <SummonsModal domainId={domain.id} onClose={close} />}
       {modal?.kind === "conclave" && <ConclaveModal onClose={close} />}
       {modal?.kind === "devices" && <DevicesModal onClose={close} />}
-      {modal?.kind === "settings" && <SettingsModal onClose={close} />}
+      {modal?.kind === "settings" && <SettingsModal onClose={close} onNodeAdmin={() => { close(); setNodeAdmin(true); }} />}
       {modal?.kind === "member" && domain && (
         <MemberModal domainId={domain.id} userId={modal.userId} onClose={close} />
       )}

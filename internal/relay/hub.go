@@ -39,6 +39,17 @@ func (h *Hub) Subscribe(userID string) (<-chan Event, func()) {
 	}
 }
 
+// OnlineUsers returns the users with at least one live connection.
+func (h *Hub) OnlineUsers() map[string]bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[string]bool, len(h.conns))
+	for u := range h.conns {
+		out[u] = true
+	}
+	return out
+}
+
 func (h *Hub) Notify(userIDs []string, ev Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
