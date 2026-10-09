@@ -1,4 +1,5 @@
 import { useApp } from "../app";
+import { AppUpdate } from "./AppUpdate";
 import { Auth } from "./Auth";
 import { Connect } from "./Connect";
 import { Effects, LOADING } from "./common";
@@ -18,6 +19,7 @@ export function App() {
       {app.phase === "connect" && <Connect />}
       {app.phase === "auth" && <Auth />}
       {app.phase === "main" && <Main />}
+      <AppUpdate />
     </div>
   );
 }

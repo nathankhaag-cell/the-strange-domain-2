@@ -112,6 +112,29 @@ The first account created on a new node becomes its administrator.
 
 To update later, download the new archive, copy the new `domain-node` over `/usr/local/bin/domain-node`, and run `sudo systemctl restart domain-node`. Your data in `/var/lib/strange-domain` is kept.
 
+### Seeing what the node is doing
+
+When it starts, the node prints its version, its data folder and every address it can be opened at, for example:
+
+```
+The Strange Domain node v0.1.0
+Data folder: /var/lib/strange-domain
+Open in a browser: http://localhost:8743
+Open in a browser: http://192.168.1.20:8743
+```
+
+With a self-signed certificate it also prints the certificate's fingerprint. On a Pi, `journalctl -u domain-node` shows the same lines.
+
+Every minute it logs one `status` line: devices and live connections, users, domains, requests per minute, messages relayed, data in and out, and errors. `-status-interval 10s` changes how often; `-status-interval 0` turns it off. `-log-level debug` also logs every request (without IDs or invite codes in the paths).
+
+In the app, the node's administrator (the first account created on it) has a **Node admin** button at the top. It shows the same numbers live, plus uptime, version, database size, per-domain counts and recent errors. Nobody else can open it. It never shows message contents (the node cannot read them) or anyone's network address.
+
+## Updates
+
+- **Node:** at start-up and once a day, the node asks GitHub whether a newer release exists. If one does, it logs `a newer version of the node is available` with the download link, and the Node admin view shows it. It never downloads or installs anything; update it as described above. Without internet (a home network with no internet, a mesh network) the check fails quietly and the node works as usual. `-update-check=false` turns it off.
+- **Desktop app:** a few seconds after it starts, the app checks GitHub. If a newer version exists it asks first. On Windows and with the AppImage on Linux, **Update and restart** downloads and installs it and reopens the app. With the .deb and on macOS the app cannot replace itself, so it offers **Open download page** instead. Set the environment variable `STRANGE_DOMAIN_NO_UPDATE_CHECK=1` to turn the check off.
+- **Android app:** when it starts, the app checks GitHub and, if there is a newer version, shows a bar with a **Download** link to the new `.apk`. Android does not let an app installed outside the Play Store update itself, so you install the download as in [Android](#android) above. A debug-signed app must be uninstalled first (see the note there).
+
 ## Opening the node in a browser on another computer (HTTPS)
 
 Browsers only allow the encryption this client needs on secure pages: `https://` addresses, or `http://localhost` on the node's own computer. A page at `http://192.168.1.20:8743` opened from another computer shows a message saying so. The desktop and Android apps do not have this problem and work with plain `http://`.

@@ -13,6 +13,7 @@ import (
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/update"
 )
 
 // The web client is embedded so the node serves it with no internet access.
@@ -34,21 +35,37 @@ type Server struct {
 	hub     *relay.Hub
 	started time.Time
 	mux     *http.ServeMux
+	handler http.Handler
+	metrics *Metrics
+	updates *update.Checker
 }
 
 func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Service, hub *relay.Hub) *Server {
-	s := &Server{st: st, dom: dom, auth: au, relay: rl, hub: hub, started: time.Now(), mux: http.NewServeMux()}
+	s := &Server{st: st, dom: dom, auth: au, relay: rl, hub: hub, started: time.Now(), mux: http.NewServeMux(), metrics: newMetrics()}
 	s.mux.HandleFunc("GET /healthz", s.healthz)
 	s.mux.HandleFunc("GET /api/v1/info", s.info)
 	s.routes()
 	s.relayRoutes()
 	s.deviceRoutes()
+	s.adminRoutes()
 	web, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /", http.FileServer(http.FS(web)))
+	s.handler = s.instrument(http.HandlerFunc(s.serve))
 	return s
 }
 
+// Metrics returns the node's traffic counters.
+func (s *Server) Metrics() *Metrics { return s.metrics }
+
+// SetUpdateChecker shows the checker's result to the node admin. Call it
+// before serving.
+func (s *Server) SetUpdateChecker(c *update.Checker) { s.updates = c }
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
+
+func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; frame-ancestors 'none'")

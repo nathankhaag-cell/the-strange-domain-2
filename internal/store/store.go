@@ -17,7 +17,8 @@ import (
 
 // Store wraps the node's database.
 type Store struct {
-	DB *sql.DB
+	DB  *sql.DB
+	Dir string // the data directory
 }
 
 // Open opens (creating if needed) the database in dataDir and applies migrations.
@@ -34,12 +35,24 @@ func Open(ctx context.Context, dataDir string) (*Store, error) {
 	// SQLite allows one writer at a time; a single connection avoids lock churn
 	// and is plenty for a family-sized node.
 	db.SetMaxOpenConns(1)
-	s := &Store{DB: db}
+	s := &Store{DB: db, Dir: dataDir}
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+// Size returns the database's size on disk in bytes, including the
+// write-ahead log.
+func (s *Store) Size() int64 {
+	var total int64
+	for _, name := range []string{"node.db", "node.db-wal"} {
+		if fi, err := os.Stat(filepath.Join(s.Dir, name)); err == nil {
+			total += fi.Size()
+		}
+	}
+	return total
 }
 
 // Close closes the database.

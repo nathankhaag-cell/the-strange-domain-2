@@ -30,6 +30,8 @@ go run ./cmd/domain-node -listen :8743
 
 Then open http://localhost:8743. Data goes to your user config folder (`%AppData%\strange-domain` on Windows, `~/Library/Application Support/strange-domain` on macOS, `~/.config/strange-domain` on Linux) unless you pass `-data <dir>`.
 
+At start-up the node prints every address it can be opened at. It logs a one-line traffic `status` every minute (`-status-interval`, `0` turns it off), logs each request with `-log-level debug`, and checks GitHub for a newer release (`-update-check=false` turns that off; failures are silent). The first account on the node (its administrator) has a **Node admin** view in the client with live counters, backed by `GET /api/v1/admin/stats`.
+
 **Installing and releases:** [docs/INSTALL.md](docs/INSTALL.md) covers downloading the apps, running the node on a Raspberry Pi, and cutting a release (push a `v*` tag, or Actions > Release > Run workflow).
 
 **HTTPS.** Browsers only give the client WebCrypto on secure pages, so a browser on another machine needs HTTPS. `-tls-self-signed` makes a certificate once, keeps it in `<data>/tls` and logs its SHA-256 fingerprint; `-tls-cert`/`-tls-key` use your own. With `-tls-listen :8744` the node serves HTTPS there and keeps plain HTTP on `-listen` (the desktop and Android apps work over plain HTTP).

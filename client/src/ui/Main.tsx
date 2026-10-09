@@ -18,6 +18,7 @@ import type { ShownMessage } from "../crypto/types";
 import { Badge, REDACTED, TAGLINE, errText, fmtTime, initials } from "./common";
 import { nodeHost } from "../node";
 import { Lock, RoleIcon, Speaker } from "./icons";
+import { NodeAdmin } from "./NodeAdmin";
 import { actorFor, canActOn, has, roleBadge } from "./perms";
 import {
   AddDomainModal,
@@ -40,6 +41,7 @@ export function Main() {
   const app = useApp();
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [showMembers, setShowMembers] = useState(false);
+  const [nodeAdmin, setNodeAdmin] = useState(false);
   const close = () => setModal(null);
 
   const domain = app.domains.find((d) => d.id === app.selDomain);
@@ -65,10 +67,16 @@ export function Main() {
         <button type="button" class="btn-small" aria-pressed={!app.effects} onClick={() => setEffects(!app.effects)}>
           {app.effects ? "Reduce effects" : "Effects off"}
         </button>
+        {app.me?.is_node_admin && (
+          <button type="button" class="btn-small" onClick={() => setNodeAdmin(true)}>
+            Node admin
+          </button>
+        )}
         <button type="button" class="btn-small" onClick={() => void signOut()}>
           Sign out
         </button>
       </header>
+      {nodeAdmin && <NodeAdmin onClose={() => setNodeAdmin(false)} />}
 
       {app.showRecoveryHint && (
         <div class="banner">

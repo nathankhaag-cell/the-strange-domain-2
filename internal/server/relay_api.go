@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -158,6 +159,9 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, a auth.Acco
 		writeErr(w, err)
 		return
 	}
+	if req.Kind == relay.KindApplication {
+		s.metrics.messages.Add(1)
+	}
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]int64{"seq": m.Seq})
 }
@@ -225,6 +229,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 
 	events, unsubscribe := s.hub.Subscribe(acct.UserID)
 	defer unsubscribe()
+	s.metrics.streamOpened(acct.DeviceID)
+	defer s.metrics.streamClosed(acct.DeviceID)
 	ctx := conn.CloseRead(r.Context()) // we only write from here on
 	if err := wsjson.Write(ctx, conn, map[string]string{"type": "ready"}); err != nil {
 		return
@@ -240,12 +246,17 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				conn.Close(websocket.StatusTryAgainLater, "too slow; resync")
 				return
 			}
+			b, err := json.Marshal(ev)
+			if err != nil {
+				return
+			}
 			wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := wsjson.Write(wctx, conn, ev)
+			err = conn.Write(wctx, websocket.MessageText, b)
 			cancel()
 			if err != nil {
 				return
 			}
+			s.metrics.bytesOut.Add(int64(len(b)))
 		case <-ping.C:
 			pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := conn.Ping(pctx)

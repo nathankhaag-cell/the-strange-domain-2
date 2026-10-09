@@ -1,0 +1,79 @@
+/* Node admin view and the phone app's update bar. Kept apart from
+   styles.css; uses its colours and controls. */
+
+.modal.node-admin {
+  max-width: 860px;
+}
+.node-admin section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.node-admin section p {
+  margin: 0;
+}
+.stat-grid.admin-grid {
+  max-width: none;
+}
+.note.admin-update {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.admin-table-wrap {
+  overflow-x: auto;
+}
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 18px;
+}
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.admin-table th {
+  color: var(--fg-dim);
+  font-weight: normal;
+  font-size: 15px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.admin-table td + td,
+.admin-table th + th {
+  text-align: right;
+}
+.admin-errors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 17px;
+}
+.admin-errors li {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .stat-grid.admin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.app-update {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  background: var(--bg);
+  border-top: 1px solid var(--accent);
+  border-bottom: none;
+}
+.app-update a.btn-small {
+  text-decoration: none;
+  color: var(--accent);
+  border-color: var(--accent);
+}
