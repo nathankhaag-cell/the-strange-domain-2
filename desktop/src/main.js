@@ -20,6 +20,7 @@ const https = require("node:https");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { normalize, needsSecureSwitch } = require("./address");
+const { scheduleUpdateCheck } = require("./updates");
 
 const CONNECT_PAGE = path.join(__dirname, "connect.html");
 const CONNECT_URL = pathToFileURL(CONNECT_PAGE).href;
@@ -300,6 +301,7 @@ if (!app.requestSingleInstanceLock()) {
 
     buildMenu();
     createWindow();
+    scheduleUpdateCheck(() => win);
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
