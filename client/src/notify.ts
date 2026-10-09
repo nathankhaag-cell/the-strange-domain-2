@@ -85,25 +85,75 @@ if (typeof window !== "undefined") {
   window.addEventListener("keydown", unlock);
 }
 
+let noise: AudioBuffer | null = null;
+
+/** 100 ms of white noise, made once and reused for the squelch. */
+function noiseBuffer(ctx: AudioContext): AudioBuffer {
+  if (noise && noise.sampleRate === ctx.sampleRate) return noise;
+  const len = Math.ceil(ctx.sampleRate * 0.1);
+  noise = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = noise.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  return noise;
+}
+
+/** A short burst of band-passed noise, like a radio's squelch opening or closing. */
+function squelch(ctx: AudioContext, out: AudioNode, t: number, dur: number, peak: number) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx);
+  const band = ctx.createBiquadFilter();
+  band.type = "bandpass";
+  band.frequency.value = 2200;
+  band.Q.value = 1.4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(peak, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(band).connect(g).connect(out);
+  src.start(t);
+  src.stop(t + dur + 0.01);
+}
+
 /**
- * PLACEHOLDER tone, pending approval: one plain 880 Hz sine beep, 150 ms,
- * quiet, made with WebAudio so no sound file is shipped.
+ * The message sound: a soft radio chirp, made with WebAudio so no sound file
+ * is shipped. About 250 ms: a brief squelch, a quick rising-then-falling
+ * tone softened by a low-pass filter, and a fainter squelch as it closes.
+ * Peaks stay far below full scale, so it never clips.
  */
 export function playTone() {
   const ctx = audioContext();
   if (!ctx) return;
   if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
   const t = ctx.currentTime + 0.01;
+
+  const out = ctx.createGain();
+  out.gain.value = 1;
+  out.connect(ctx.destination);
+
+  squelch(ctx, out, t, 0.06, 0.05);
+
+  // The chirp: up from 1.1 kHz to 1.75 kHz, then down to 1.3 kHz.
+  const c = t + 0.035;
   const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = "sine";
-  osc.frequency.value = 880;
-  gain.gain.setValueAtTime(0.0001, t);
-  gain.gain.exponentialRampToValueAtTime(0.08, t + 0.01);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
-  osc.connect(gain).connect(ctx.destination);
-  osc.start(t);
-  osc.stop(t + 0.16);
+  osc.type = "square";
+  osc.frequency.setValueAtTime(1100, c);
+  osc.frequency.exponentialRampToValueAtTime(1750, c + 0.07);
+  osc.frequency.exponentialRampToValueAtTime(1300, c + 0.16);
+  const soft = ctx.createBiquadFilter();
+  soft.type = "lowpass";
+  soft.frequency.value = 2400;
+  soft.Q.value = 0.5;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, c);
+  g.gain.exponentialRampToValueAtTime(0.03, c + 0.012);
+  g.gain.setValueAtTime(0.03, c + 0.11);
+  g.gain.exponentialRampToValueAtTime(0.0001, c + 0.18);
+  osc.connect(soft).connect(g).connect(out);
+  osc.start(c);
+  osc.stop(c + 0.19);
+
+  squelch(ctx, out, c + 0.17, 0.05, 0.02);
+  osc.onended = () => setTimeout(() => out.disconnect(), 100);
 }
 
 // ---- OS notifications ----

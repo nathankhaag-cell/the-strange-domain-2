@@ -11,6 +11,7 @@ import {
   signOut,
   useApp,
 } from "../app";
+import { has as nodeHas } from "../compat";
 import { renderAvatar } from "../files";
 import { permission, type Permission } from "../notify";
 import { Modal, errText } from "./common";
@@ -41,7 +42,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     <Modal title="Settings" onClose={onClose}>
       <div class="modal-form">
         <h3>Profile picture</h3>
-        <AvatarPicker />
+        {nodeHas(app.info, "avatars") ? (
+          <AvatarPicker />
+        ) : (
+          <p class="muted small">This node runs an older version and does not support profile pictures yet.</p>
+        )}
       </div>
 
       <div class="modal-form">

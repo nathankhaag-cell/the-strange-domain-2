@@ -19,7 +19,8 @@ import {
 } from "../app";
 import type { ShownMessage } from "../crypto/types";
 import { Badge, REDACTED, TAGLINE, errText, fmtTime, initials } from "./common";
-import { nodeHost } from "../node";
+import { BUNDLED, nodeHost } from "../node";
+import { OLD_NODE_NOTE, compatMessage, compatStatus, has as nodeHas } from "../compat";
 import { Lock, MenuIcon, Paperclip, RoleIcon, Speaker } from "./icons";
 import { fmtSize } from "../files";
 import { Attachments, Avatar } from "./Media";
@@ -125,6 +126,12 @@ export function Main() {
           Sign out
         </button>
       </header>
+
+      {BUNDLED && compatStatus(app.info) !== "ok" && (
+        <div class="banner" role="status">
+          <span>{compatMessage(compatStatus(app.info))}</span>
+        </div>
+      )}
 
       {app.askNotify && (
         <div class="banner">
@@ -472,7 +479,11 @@ function MessagePane(props: {
 
   useEffect(() => setErr(""), [groupId]);
 
+  // Off when the node is older than this client (phone app only).
+  const attachOk = nodeHas(app.info, "attachments");
+
   const addFiles = (list: FileList | File[] | null | undefined) => {
+    if (!attachOk) return;
     const add = Array.from(list ?? []).filter((f) => f.size > 0 || f.name);
     if (add.length === 0) return;
     setErr("");
@@ -555,14 +566,14 @@ function MessagePane(props: {
         aria-live="polite"
         data-status={status}
         onDragOver={(e) => {
-          if (blocked || !e.dataTransfer?.types.includes("Files")) return;
+          if (blocked || !attachOk || !e.dataTransfer?.types.includes("Files")) return;
           e.preventDefault();
           setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => {
           setDragging(false);
-          if (blocked || !e.dataTransfer?.files.length) return;
+          if (blocked || !attachOk || !e.dataTransfer?.files.length) return;
           e.preventDefault();
           addFiles(e.dataTransfer.files);
         }}
@@ -651,8 +662,8 @@ function MessagePane(props: {
           type="button"
           class="btn-icon attach-btn"
           aria-label="Attach files"
-          title="Attach files"
-          disabled={!!blocked || busy}
+          title={attachOk ? "Attach files" : OLD_NODE_NOTE}
+          disabled={!!blocked || busy || !attachOk}
           onClick={() => fileInput.current?.click()}
         >
           <Paperclip />
@@ -680,7 +691,7 @@ function MessagePane(props: {
           onInput={(e) => setText((e.target as HTMLInputElement).value)}
           onPaste={(e) => {
             const pasted = e.clipboardData?.files;
-            if (pasted && pasted.length > 0) {
+            if (attachOk && pasted && pasted.length > 0) {
               e.preventDefault();
               addFiles(pasted);
             }

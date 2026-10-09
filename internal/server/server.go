@@ -141,5 +141,9 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		"version":  Version,
 		"platform": runtime.GOOS + "/" + runtime.GOARCH,
 		"uptime_s": int(time.Since(s.started).Seconds()),
+		// See compat.go.
+		"api":            APILevel,
+		"min_client_api": MinClientAPI,
+		"features":       Features,
 	})
 }

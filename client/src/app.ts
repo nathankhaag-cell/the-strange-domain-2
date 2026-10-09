@@ -34,6 +34,7 @@ import { MlsCrypto } from "./crypto/mls";
 import type { MessageCrypto } from "./crypto/types";
 import { Stream, type StreamEvent } from "./stream";
 import { hasNode, storageSuffix } from "./node";
+import { has as nodeHas } from "./compat";
 import { encryptAndUpload, fmtSize, forgetFiles, type FileRef } from "./files";
 import type { ShownMessage } from "./crypto/types";
 import {
@@ -425,7 +426,8 @@ async function startMain() {
   if (lsGet(RECOVERY_SET_KEY) !== "1") set({ showRecoveryHint: true });
   set({ phase: "main" });
   setUnread(state.unread);
-  void api.limits().then((limits) => set({ limits }), () => undefined);
+  // Older nodes have no attachments and no limits endpoint (see compat.ts).
+  if (nodeHas(state.info, "attachments")) void api.limits().then((limits) => set({ limits }), () => undefined);
   if (!askedBefore() && (await permission()) === "default") set({ askNotify: true });
   if (!state.selDomain && state.domains[0]) await selectDomain(state.domains[0].id);
   stream = new Stream(onEvent, (online) => {

@@ -51,6 +51,10 @@ export interface Info {
   version: string;
   platform: string;
   uptime_s: number;
+  /** Absent on v1.0.0 nodes (API level 1). See compat.ts. */
+  api?: number;
+  min_client_api?: number;
+  features?: string[];
 }
 export interface Me {
   user_id: string;
