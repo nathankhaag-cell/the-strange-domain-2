@@ -32,11 +32,12 @@ import {
 import { MlsCrypto } from "./crypto/mls";
 import type { MessageCrypto } from "./crypto/types";
 import { Stream, type StreamEvent } from "./stream";
+import { hasNode, storageSuffix } from "./node";
 
 export type Honorific = "Brother" | "Sister";
 
 export interface AppState {
-  phase: "loading" | "auth" | "main";
+  phase: "loading" | "connect" | "auth" | "main";
   info?: Info;
   identity?: { callsign: string; deviceName: string };
   me?: Me;
@@ -54,10 +55,11 @@ export interface AppState {
   showRecoveryHint: boolean;
 }
 
-const TOKEN_KEY = "sd.token";
+// The session belongs to one node (see node.ts).
+const TOKEN_KEY = "sd.token" + storageSuffix;
 const EFFECTS_KEY = "sd.effects";
 const HONORIFIC_KEY = "sd.honorific";
-const RECOVERY_SET_KEY = "sd.recoverySet";
+const RECOVERY_SET_KEY = "sd.recoverySet" + storageSuffix;
 
 function lsGet(k: string): string | null {
   try {
@@ -78,7 +80,7 @@ function lsSet(k: string, v: string | null) {
 const prefersReduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 let state: AppState = {
-  phase: "loading",
+  phase: hasNode() ? "loading" : "connect",
   domains: [],
   details: {},
   conclaves: [],
@@ -142,6 +144,7 @@ export function notify(msg: string | undefined) {
 // ---- boot and sign-in ----
 
 export async function boot() {
+  if (!hasNode()) return; // the connect screen is showing
   try {
     set({ info: await api.info() });
   } catch {

@@ -1,0 +1,17 @@
+{
+  "name": "strange-domain-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Android app for The Strange Domain (Capacitor shell around the web client).",
+  "scripts": {
+    "build:web": "npm --prefix ../client run build:app",
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

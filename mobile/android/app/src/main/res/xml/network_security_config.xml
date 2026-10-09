@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nodes usually live on a home network at an address like
+     http://192.168.1.20:8743, and Android cannot list "every LAN address" as
+     a domain, so cleartext is allowed everywhere. The session token travels
+     in the clear on such a network; message content is end-to-end encrypted
+     regardless. User-installed CAs are trusted so a node with a certificate
+     from a home CA works over https. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

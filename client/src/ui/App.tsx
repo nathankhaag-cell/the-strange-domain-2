@@ -1,5 +1,6 @@
 import { useApp } from "../app";
 import { Auth } from "./Auth";
+import { Connect } from "./Connect";
 import { Effects, LOADING } from "./common";
 import { Main } from "./Main";
 
@@ -14,6 +15,7 @@ export function App() {
           <span class="cursor" aria-hidden="true" />
         </div>
       )}
+      {app.phase === "connect" && <Connect />}
       {app.phase === "auth" && <Auth />}
       {app.phase === "main" && <Main />}
     </div>

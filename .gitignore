@@ -4,3 +4,7 @@
 *.db-wal
 *.db-shm
 /client/node_modules/
+/desktop/node_modules/
+/desktop/dist/
+/mobile/node_modules/
+/mobile/www/
