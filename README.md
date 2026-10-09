@@ -11,11 +11,12 @@ Phase 0, foundations. What exists today:
 - A SQLite database with users, devices, domains, roles, members, bans, channels, invites and an audit log.
 - Domain rules: anyone can create a domain and owns it; Abbots, Bishops and Wardens manage roles, invites, mute, kick and ban, and nobody can act on someone of equal or higher rank.
 - Sign-in with no passwords: each device registers an Ed25519 public key and signs a single-use challenge to get a session token. The first account on a node becomes its administrator; everyone after that needs a Summons, which also joins them to that domain.
+- The server side of end-to-end encryption: an MLS delivery service that stores and orders opaque messages, accepts one commit per epoch, hands out device KeyPackages, forwards Welcome messages, and pushes live events over a WebSocket (`/api/v1/stream`). The node never holds keys. Groups are domain channels or Conclaves (DMs outside a domain; a Confession has two members). Members with the delete permission can erase a message's ciphertext, leaving a tombstone.
 - A JSON API for domains, Chapels and Voice Relays, Summons, roles and moderation (see `internal/server/api.go`), plus `/healthz`, `/api/v1/info` and a placeholder page.
 
 Default roles in every new domain, highest first: **Abbot** (owner), **Bishop** (senior moderator), **Warden** (moderator), **Brother / Sister** (member, given to people who join by Summons) and **Postulant** (new or unverified). Owners can rename them.
 
-Not built yet: the encrypted messaging protocol (MLS), voice, and the themed client.
+Not built yet: the client-side MLS encryption (the node is ready for it), voice, and the themed client.
 
 ## Run it
 
@@ -46,6 +47,7 @@ internal/store      SQLite database and migrations
 internal/perm       permissions and rank rules
 internal/domains    domains, roles, invites, moderation, channels
 internal/auth       accounts, device keys, sign-in and sessions
+internal/relay      MLS delivery service, Conclaves and live push
 internal/server     HTTP API and the embedded web client
 deploy/             service files
 ```

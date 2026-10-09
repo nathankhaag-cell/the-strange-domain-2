@@ -11,9 +11,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
 )
 
@@ -25,7 +30,8 @@ func newTestServer(t *testing.T) *httptest.Server {
 	}
 	t.Cleanup(func() { st.Close() })
 	dom := domains.NewService(st)
-	ts := httptest.NewServer(New(st, dom, auth.NewService(st, dom)))
+	hub := relay.NewHub()
+	ts := httptest.NewServer(New(st, dom, auth.NewService(st, dom), relay.NewService(st, hub), hub))
 	t.Cleanup(ts.Close)
 	return ts
 }
@@ -221,5 +227,70 @@ func TestChallengeCannotBeReplayedOrForged(t *testing.T) {
 	}
 	if code := call(t, ts, "GET", "/api/v1/me", "not-a-token", nil, nil); code != http.StatusUnauthorized {
 		t.Fatalf("bad token: %d", code)
+	}
+}
+
+func TestStreamPushesMessages(t *testing.T) {
+	ts := newTestServer(t)
+	abbot, _ := signUp(t, ts, "abbot", "")
+	var d domainJSON
+	call(t, ts, "POST", "/api/v1/domains", abbot.token, map[string]string{"name": "Sector 7"}, &d)
+	var detail struct {
+		Channels []struct{ ID string } `json:"channels"`
+	}
+	call(t, ts, "GET", "/api/v1/domains/"+d.ID, abbot.token, nil, &detail)
+	chapel := detail.Channels[0].ID
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/api/v1/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	if err := wsjson.Write(ctx, conn, map[string]string{"token": abbot.token}); err != nil {
+		t.Fatal(err)
+	}
+	var ready map[string]string
+	if err := wsjson.Read(ctx, conn, &ready); err != nil || ready["type"] != "ready" {
+		t.Fatalf("ready: %v %v", ready, err)
+	}
+
+	var sent struct{ Seq int64 }
+	if code := call(t, ts, "POST", "/api/v1/groups/"+chapel+"/messages", abbot.token,
+		map[string]any{"kind": "application", "epoch": 0, "data": []byte("ciphertext")}, &sent); code != http.StatusCreated {
+		t.Fatalf("send: %d", code)
+	}
+	var ev relay.Event
+	if err := wsjson.Read(ctx, conn, &ev); err != nil || ev.Type != "message" || ev.Seq != sent.Seq {
+		t.Fatalf("event: %+v %v", ev, err)
+	}
+	var msgs []relay.Message
+	call(t, ts, "GET", "/api/v1/groups/"+chapel+"/messages?after=0", abbot.token, nil, &msgs)
+	if len(msgs) != 1 || string(msgs[0].Data) != "ciphertext" {
+		t.Fatalf("fetch: %+v", msgs)
+	}
+	// A stale-epoch commit is refused with 409.
+	call(t, ts, "POST", "/api/v1/groups/"+chapel+"/messages", abbot.token,
+		map[string]any{"kind": "commit", "epoch": 0, "data": []byte("c")}, nil)
+	if code := call(t, ts, "POST", "/api/v1/groups/"+chapel+"/messages", abbot.token,
+		map[string]any{"kind": "commit", "epoch": 0, "data": []byte("c")}, nil); code != http.StatusConflict {
+		t.Fatalf("stale commit: %d", code)
+	}
+}
+
+func TestStreamRejectsBadToken(t *testing.T) {
+	ts := newTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/api/v1/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	wsjson.Write(ctx, conn, map[string]string{"token": "nope"})
+	var v any
+	if err := wsjson.Read(ctx, conn, &v); websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("got %v, want policy violation close", err)
 	}
 }

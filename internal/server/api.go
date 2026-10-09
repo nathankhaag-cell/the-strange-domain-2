@@ -12,6 +12,7 @@ import (
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
 )
 
 // API vocabulary follows the approved theme where users see it:
@@ -314,7 +315,11 @@ func (s *Server) unban(w http.ResponseWriter, r *http.Request, a auth.Account) {
 // ---- helpers ----
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	return readJSONLimit(w, r, v, maxBody)
+}
+
+func readJSONLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		writeErr(w, domains.ErrInvalidInput)
@@ -350,8 +355,12 @@ func writeErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, domains.ErrNotFound), errors.Is(err, domains.ErrInvalidInvite):
 		status = http.StatusNotFound
 	case errors.Is(err, domains.ErrAlreadyMember), errors.Is(err, auth.ErrCallsignTaken),
-		errors.Is(err, auth.ErrDeviceKnown):
+		errors.Is(err, auth.ErrDeviceKnown), errors.Is(err, relay.ErrStaleEpoch):
 		status = http.StatusConflict
+	case errors.Is(err, relay.ErrNoKeys):
+		status = http.StatusNotFound
+	case errors.Is(err, relay.ErrTooLarge):
+		status = http.StatusRequestEntityTooLarge
 	}
 	msg := err.Error()
 	if status == http.StatusInternalServerError {
