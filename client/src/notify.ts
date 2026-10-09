@@ -87,7 +87,7 @@ if (typeof window !== "undefined") {
 
 let noise: AudioBuffer | null = null;
 
-/** 100 ms of white noise, made once and reused for the squelch. */
+/** 100 ms of white noise, made once and reused for the crackle. */
 function noiseBuffer(ctx: AudioContext): AudioBuffer {
   if (noise && noise.sampleRate === ctx.sampleRate) return noise;
   const len = Math.ceil(ctx.sampleRate * 0.1);
@@ -97,27 +97,27 @@ function noiseBuffer(ctx: AudioContext): AudioBuffer {
   return noise;
 }
 
-/** A short burst of band-passed noise, like a radio's squelch opening or closing. */
-function squelch(ctx: AudioContext, out: AudioNode, t: number, dur: number, peak: number) {
+/** A faint burst of low-passed noise, like the crackle of a valve warming up. */
+function crackle(ctx: AudioContext, out: AudioNode, t: number, dur: number, peak: number) {
   const src = ctx.createBufferSource();
   src.buffer = noiseBuffer(ctx);
-  const band = ctx.createBiquadFilter();
-  band.type = "bandpass";
-  band.frequency.value = 2200;
-  band.Q.value = 1.4;
+  const low = ctx.createBiquadFilter();
+  low.type = "lowpass";
+  low.frequency.value = 900;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(peak, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(peak, t + 0.01);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  src.connect(band).connect(g).connect(out);
+  src.connect(low).connect(g).connect(out);
   src.start(t);
   src.stop(t + dur + 0.01);
 }
 
 /**
- * The message sound: a soft radio chirp, made with WebAudio so no sound file
- * is shipped. About 250 ms: a brief squelch, a quick rising-then-falling
- * tone softened by a low-pass filter, and a fainter squelch as it closes.
+ * The message sound: a vacuum tube hum, made with WebAudio so no sound file
+ * is shipped. About 600 ms: a 60 Hz sawtooth whose low-pass filter opens and
+ * closes like a valve warming up and settling, with a faint crackle at the
+ * start. The harmonics keep it audible on small laptop and phone speakers.
  * Peaks stay far below full scale, so it never clips.
  */
 export function playTone() {
@@ -130,29 +130,26 @@ export function playTone() {
   out.gain.value = 1;
   out.connect(ctx.destination);
 
-  squelch(ctx, out, t, 0.06, 0.05);
+  crackle(ctx, out, t, 0.08, 0.025);
 
-  // The chirp: up from 1.1 kHz to 1.75 kHz, then down to 1.3 kHz.
-  const c = t + 0.035;
   const osc = ctx.createOscillator();
-  osc.type = "square";
-  osc.frequency.setValueAtTime(1100, c);
-  osc.frequency.exponentialRampToValueAtTime(1750, c + 0.07);
-  osc.frequency.exponentialRampToValueAtTime(1300, c + 0.16);
-  const soft = ctx.createBiquadFilter();
-  soft.type = "lowpass";
-  soft.frequency.value = 2400;
-  soft.Q.value = 0.5;
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(60, t);
+  const warm = ctx.createBiquadFilter();
+  warm.type = "lowpass";
+  warm.Q.value = 4;
+  warm.frequency.setValueAtTime(140, t);
+  warm.frequency.exponentialRampToValueAtTime(700, t + 0.18);
+  warm.frequency.exponentialRampToValueAtTime(260, t + 0.6);
   const g = ctx.createGain();
-  g.gain.setValueAtTime(0.0001, c);
-  g.gain.exponentialRampToValueAtTime(0.03, c + 0.012);
-  g.gain.setValueAtTime(0.03, c + 0.11);
-  g.gain.exponentialRampToValueAtTime(0.0001, c + 0.18);
-  osc.connect(soft).connect(g).connect(out);
-  osc.start(c);
-  osc.stop(c + 0.19);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.09, t + 0.06);
+  g.gain.setValueAtTime(0.09, t + 0.35);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+  osc.connect(warm).connect(g).connect(out);
+  osc.start(t);
+  osc.stop(t + 0.62);
 
-  squelch(ctx, out, c + 0.17, 0.05, 0.02);
   osc.onended = () => setTimeout(() => out.disconnect(), 100);
 }
 
