@@ -66,6 +66,7 @@ func (s *Server) linkDevice(w http.ResponseWriter, r *http.Request) {
 	// The person's other devices add the new one to their MLS groups and may
 	// offer it their history.
 	s.hub.Notify([]string{acct.UserID}, relay.Event{Type: "device_linked", GroupID: acct.DeviceID})
+	s.notifyPeers(r.Context(), acct.UserID, "devices", acct.UserID)
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]any{"user_id": acct.UserID, "device_id": acct.DeviceID, "callsign": acct.Callsign})
 }
@@ -77,6 +78,7 @@ func (s *Server) revokeDevice(w http.ResponseWriter, r *http.Request, a auth.Acc
 		return
 	}
 	s.hub.Notify([]string{a.UserID}, relay.Event{Type: "device_revoked", GroupID: id})
+	s.notifyPeers(r.Context(), a.UserID, "devices", a.UserID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -133,6 +135,8 @@ func (s *Server) recover(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// The lost devices are gone; peers' clients remove them from MLS groups.
+	s.notifyPeers(r.Context(), acct.UserID, "devices", acct.UserID)
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]any{"user_id": acct.UserID, "device_id": acct.DeviceID, "callsign": acct.Callsign})
 }

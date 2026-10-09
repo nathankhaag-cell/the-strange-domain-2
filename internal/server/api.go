@@ -82,6 +82,14 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if req.Summons != "" {
+		// A new account belongs to exactly the one domain its Summons joined.
+		if ds, err := s.dom.DomainsForUser(r.Context(), acct.UserID); err == nil {
+			for _, d := range ds {
+				s.notifyDomain(r.Context(), d.ID)
+			}
+		}
+	}
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]any{"user_id": acct.UserID, "device_id": acct.DeviceID, "is_node_admin": acct.IsNodeAdmin})
 }
@@ -241,6 +249,7 @@ func (s *Server) createChannel(w http.ResponseWriter, r *http.Request, a auth.Ac
 		writeErr(w, err)
 		return
 	}
+	s.notifyDomain(r.Context(), r.PathValue("id"))
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]string{"id": c.ID, "name": c.Name, "kind": c.Kind})
 }
@@ -273,6 +282,7 @@ func (s *Server) acceptSummons(w http.ResponseWriter, r *http.Request, a auth.Ac
 		writeErr(w, err)
 		return
 	}
+	s.notifyDomain(r.Context(), d.ID)
 	writeJSON(w, domainJSON{d.ID, d.Name, d.OwnerID})
 }
 
@@ -285,17 +295,17 @@ func (s *Server) assignRole(w http.ResponseWriter, r *http.Request, a auth.Accou
 	if !readJSON(w, r, &req) {
 		return
 	}
-	done(w, s.dom.AssignRole(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), req.RoleID))
+	s.domainDone(w, r, s.dom.AssignRole(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), req.RoleID))
 }
 
 func (s *Server) mute(muted bool) func(http.ResponseWriter, *http.Request, auth.Account) {
 	return func(w http.ResponseWriter, r *http.Request, a auth.Account) {
-		done(w, s.dom.SetMuted(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), muted))
+		s.domainDone(w, r, s.dom.SetMuted(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), muted))
 	}
 }
 
 func (s *Server) kick(w http.ResponseWriter, r *http.Request, a auth.Account) {
-	done(w, s.dom.Kick(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid")))
+	s.domainDone(w, r, s.dom.Kick(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid")), r.PathValue("uid"))
 }
 
 func (s *Server) ban(w http.ResponseWriter, r *http.Request, a auth.Account) {
@@ -305,11 +315,36 @@ func (s *Server) ban(w http.ResponseWriter, r *http.Request, a auth.Account) {
 	if r.ContentLength != 0 && !readJSON(w, r, &req) {
 		return
 	}
-	done(w, s.dom.Ban(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), req.Reason))
+	s.domainDone(w, r, s.dom.Ban(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), req.Reason), r.PathValue("uid"))
 }
 
 func (s *Server) unban(w http.ResponseWriter, r *http.Request, a auth.Account) {
-	done(w, s.dom.Unban(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid")))
+	s.domainDone(w, r, s.dom.Unban(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid")))
+}
+
+// ---- live updates ----
+
+// notifyDomain tells a domain's members (and any extra users, such as someone
+// just kicked) that its members, roles or channels changed. Clients refetch the
+// domain and, for membership changes, add or remove devices in their MLS groups.
+func (s *Server) notifyDomain(ctx context.Context, domainID string, extra ...string) {
+	members, err := s.dom.Members(ctx, domainID)
+	if err != nil {
+		return
+	}
+	ids := append([]string{}, extra...)
+	for _, m := range members {
+		ids = append(ids, m.UserID)
+	}
+	s.hub.Notify(ids, relay.Event{Type: "domain", GroupID: domainID})
+}
+
+// domainDone finishes a moderation request and, on success, notifies the domain.
+func (s *Server) domainDone(w http.ResponseWriter, r *http.Request, err error, extra ...string) {
+	if err == nil {
+		s.notifyDomain(r.Context(), r.PathValue("id"), extra...)
+	}
+	done(w, err)
 }
 
 // ---- helpers ----

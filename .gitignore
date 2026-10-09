@@ -3,3 +3,4 @@
 *.db
 *.db-wal
 *.db-shm
+/client/node_modules/

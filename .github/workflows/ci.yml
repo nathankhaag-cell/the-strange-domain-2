@@ -21,8 +21,34 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      # The built client is committed so `go build` needs no Node; it must
+      # match the sources.
+      - name: Check the committed build is up to date
+        run: |
+          git diff --exit-code -- ../internal/server/web
+          if [ -n "$(git status --porcelain -- ../internal/server/web)" ]; then
+            git status --porcelain -- ../internal/server/web
+            echo "internal/server/web is out of date: run 'npm run build' in client/ and commit the result"
+            exit 1
+          fi
+
   build:
-    needs: test
+    needs: [test, client]
     runs-on: ubuntu-latest
     strategy:
       matrix:

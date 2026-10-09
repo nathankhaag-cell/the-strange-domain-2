@@ -60,7 +60,7 @@ type Welcome struct {
 
 // Event is pushed to connected clients; they fetch the content themselves.
 type Event struct {
-	Type    string `json:"type"` // "message", "deleted", "welcome"
+	Type    string `json:"type"` // "message", "deleted", "welcome", "domain", "conclave", "keys", "devices", "device_linked", "device_revoked", "transfer"
 	GroupID string `json:"group_id"`
 	Seq     int64  `json:"seq,omitempty"`
 }
@@ -546,4 +546,113 @@ func (s *Service) userList(ctx context.Context, query string, arg string) ([]str
 		out = append(out, id)
 	}
 	return out, rows.Err()
+}
+
+// ConclaveMember is one member of a Conclave.
+type ConclaveMember struct {
+	UserID   string `json:"user_id"`
+	Callsign string `json:"callsign"`
+}
+
+// Conclave is a DM group the caller belongs to.
+type Conclave struct {
+	ID        string           `json:"id"`
+	CreatedBy string           `json:"created_by"`
+	CreatedAt int64            `json:"created_at"`
+	Members   []ConclaveMember `json:"members"`
+}
+
+// Conclaves lists the Conclaves userID belongs to, newest first, with their members.
+func (s *Service) Conclaves(ctx context.Context, userID string) ([]Conclave, error) {
+	rows, err := s.st.DB.QueryContext(ctx,
+		`SELECT c.id, c.created_by, c.created_at, u.id, u.callsign
+		   FROM conclaves c
+		   JOIN conclave_members mine ON mine.conclave_id = c.id AND mine.user_id = ?
+		   JOIN conclave_members cm ON cm.conclave_id = c.id
+		   JOIN users u ON u.id = cm.user_id
+		  ORDER BY c.created_at DESC, c.id, u.callsign`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Conclave{}
+	index := map[string]int{}
+	for rows.Next() {
+		var c Conclave
+		var m ConclaveMember
+		if err := rows.Scan(&c.ID, &c.CreatedBy, &c.CreatedAt, &m.UserID, &m.Callsign); err != nil {
+			return nil, err
+		}
+		i, ok := index[c.ID]
+		if !ok {
+			i = len(out)
+			index[c.ID] = i
+			out = append(out, c)
+		}
+		out[i].Members = append(out[i].Members, m)
+	}
+	return out, rows.Err()
+}
+
+// ConclaveMemberIDs returns the user IDs in a Conclave.
+func (s *Service) ConclaveMemberIDs(ctx context.Context, conclaveID string) ([]string, error) {
+	return s.userList(ctx, `SELECT user_id FROM conclave_members WHERE conclave_id = ?`, conclaveID)
+}
+
+// Peers returns userID and everyone who shares a domain or Conclave with them.
+func (s *Service) Peers(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.st.DB.QueryContext(ctx,
+		`SELECT m2.user_id FROM members m1 JOIN members m2 ON m1.domain_id = m2.domain_id WHERE m1.user_id = ?
+		 UNION
+		 SELECT c2.user_id FROM conclave_members c1 JOIN conclave_members c2 ON c1.conclave_id = c2.conclave_id WHERE c1.user_id = ?
+		 UNION SELECT ?`, userID, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// GroupDevice is one device that belongs in a group's MLS state.
+type GroupDevice struct {
+	UserID   string `json:"user_id"`
+	DeviceID string `json:"device_id"`
+}
+
+// GroupDevices lists every device of every user who may read groupID, so
+// members' clients can add missing devices and remove revoked ones. The
+// caller must be able to read the group.
+func (s *Service) GroupDevices(ctx context.Context, groupID, userID string) ([]GroupDevice, error) {
+	users, err := s.access(ctx, groupID, userID, false)
+	if err != nil {
+		return nil, err
+	}
+	out := []GroupDevice{}
+	for _, u := range users {
+		rows, err := s.st.DB.QueryContext(ctx, `SELECT id FROM devices WHERE user_id = ? ORDER BY created_at, id`, u)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			d := GroupDevice{UserID: u}
+			if err := rows.Scan(&d.DeviceID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, d)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }

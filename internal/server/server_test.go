@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,6 +120,25 @@ func TestPublicEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(res.Header.Get("Content-Security-Policy"), "default-src 'self'") {
 		t.Fatal("missing CSP header")
+	}
+	// Every file of the embedded client is served, including bundler chunks
+	// whose names start with "_" (plain go:embed would skip them).
+	err = fs.WalkDir(webFS, "web", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		r, err := http.Get(ts.URL + strings.TrimPrefix(p, "web"))
+		if err != nil {
+			return err
+		}
+		r.Body.Close()
+		if r.StatusCode != 200 {
+			t.Errorf("%s: %d", p, r.StatusCode)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -292,5 +312,76 @@ func TestStreamRejectsBadToken(t *testing.T) {
 	var v any
 	if err := wsjson.Read(ctx, conn, &v); websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
 		t.Fatalf("got %v, want policy violation close", err)
+	}
+}
+
+func TestConclaveListAndDomainEvents(t *testing.T) {
+	ts := newTestServer(t)
+	abbot, _ := signUp(t, ts, "abbot", "")
+	var d domainJSON
+	call(t, ts, "POST", "/api/v1/domains", abbot.token, map[string]string{"name": "Sector 7"}, &d)
+	var sm struct{ Summons string }
+	call(t, ts, "POST", "/api/v1/domains/"+d.ID+"/summons", abbot.token, map[string]int{"max_uses": 5}, &sm)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/api/v1/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	wsjson.Write(ctx, conn, map[string]string{"token": abbot.token})
+	var ready map[string]string
+	wsjson.Read(ctx, conn, &ready)
+
+	// A new member joining by Summons tells existing members to refresh.
+	brother, _ := signUp(t, ts, "brother", sm.Summons)
+	var ev relay.Event
+	if err := wsjson.Read(ctx, conn, &ev); err != nil || ev.Type != "domain" || ev.GroupID != d.ID {
+		t.Fatalf("join event: %+v %v", ev, err)
+	}
+
+	// Publishing KeyPackages tells peers they can add this person's devices.
+	if code := call(t, ts, "POST", "/api/v1/keypackages", brother.token, map[string]any{"key_packages": [][]byte{[]byte("kp")}}, nil); code != http.StatusNoContent {
+		t.Fatalf("publish: %d", code)
+	}
+	if err := wsjson.Read(ctx, conn, &ev); err != nil || ev.Type != "keys" || ev.GroupID != brother.userID {
+		t.Fatalf("keys event: %+v %v", ev, err)
+	}
+
+	var created struct{ ID string }
+	if code := call(t, ts, "POST", "/api/v1/conclaves", abbot.token, map[string]any{"member_ids": []string{brother.userID}}, &created); code != 201 {
+		t.Fatalf("create conclave: %d", code)
+	}
+	if err := wsjson.Read(ctx, conn, &ev); err != nil || ev.Type != "conclave" || ev.GroupID != created.ID {
+		t.Fatalf("conclave event: %+v %v", ev, err)
+	}
+	var list []relay.Conclave
+	if code := call(t, ts, "GET", "/api/v1/conclaves", brother.token, nil, &list); code != 200 {
+		t.Fatalf("list conclaves: %d", code)
+	}
+	if len(list) != 1 || list[0].ID != created.ID || len(list[0].Members) != 2 {
+		t.Fatalf("conclaves: %+v", list)
+	}
+
+	// Members can list every device that belongs in a group's MLS state.
+	var detail struct {
+		Channels []struct{ ID string } `json:"channels"`
+	}
+	call(t, ts, "GET", "/api/v1/domains/"+d.ID, abbot.token, nil, &detail)
+	var devs []relay.GroupDevice
+	if code := call(t, ts, "GET", "/api/v1/groups/"+detail.Channels[0].ID+"/devices", brother.token, nil, &devs); code != 200 || len(devs) != 2 {
+		t.Fatalf("group devices: %d %+v", code, devs)
+	}
+
+	// Kicking notifies the domain, including the person removed.
+	if code := call(t, ts, "POST", "/api/v1/domains/"+d.ID+"/members/"+brother.userID+"/kick", abbot.token, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("kick: %d", code)
+	}
+	if err := wsjson.Read(ctx, conn, &ev); err != nil || ev.Type != "domain" {
+		t.Fatalf("kick event: %+v %v", ev, err)
+	}
+	if code := call(t, ts, "GET", "/api/v1/groups/"+detail.Channels[0].ID+"/devices", brother.token, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("kicked member lists devices: %d", code)
 	}
 }

@@ -21,10 +21,12 @@ func (s *Server) relayRoutes() {
 	s.mux.Handle("POST /api/v1/keypackages", s.authed(s.publishKeyPackages))
 	s.mux.Handle("POST /api/v1/users/{uid}/keypackages/claim", s.authed(s.claimKeyPackages))
 
+	s.mux.Handle("GET /api/v1/conclaves", s.authed(s.listConclaves))
 	s.mux.Handle("POST /api/v1/conclaves", s.authed(s.createConclave))
 	s.mux.Handle("DELETE /api/v1/conclaves/{id}/members/me", s.authed(s.leaveConclave))
 
 	s.mux.Handle("GET /api/v1/groups/{gid}/epoch", s.authed(s.groupEpoch))
+	s.mux.Handle("GET /api/v1/groups/{gid}/devices", s.authed(s.groupDevices))
 	s.mux.Handle("GET /api/v1/groups/{gid}/messages", s.authed(s.fetchMessages))
 	s.mux.Handle("POST /api/v1/groups/{gid}/messages", s.authed(s.sendMessage))
 	s.mux.Handle("DELETE /api/v1/groups/{gid}/messages/{seq}", s.authed(s.deleteMessage))
@@ -41,7 +43,14 @@ func (s *Server) publishKeyPackages(w http.ResponseWriter, r *http.Request, a au
 	if !readJSONLimit(w, r, &req, 2<<20) {
 		return
 	}
-	done(w, s.relay.PublishKeyPackages(r.Context(), a.DeviceID, req.KeyPackages))
+	if err := s.relay.PublishKeyPackages(r.Context(), a.DeviceID, req.KeyPackages); err != nil {
+		writeErr(w, err)
+		return
+	}
+	// Peers whose clients tried to add this person's devices to an MLS group
+	// while they had no KeyPackages can now retry.
+	s.notifyPeers(r.Context(), a.UserID, "keys", a.UserID)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) claimKeyPackages(w http.ResponseWriter, r *http.Request, a auth.Account) {
@@ -65,12 +74,35 @@ func (s *Server) createConclave(w http.ResponseWriter, r *http.Request, a auth.A
 		writeErr(w, err)
 		return
 	}
+	s.notifyConclave(r.Context(), id)
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]string{"id": id})
 }
 
 func (s *Server) leaveConclave(w http.ResponseWriter, r *http.Request, a auth.Account) {
-	done(w, s.relay.LeaveConclave(r.Context(), r.PathValue("id"), a.UserID))
+	err := s.relay.LeaveConclave(r.Context(), r.PathValue("id"), a.UserID)
+	if err == nil {
+		s.notifyConclave(r.Context(), r.PathValue("id"), a.UserID)
+	}
+	done(w, err)
+}
+
+func (s *Server) listConclaves(w http.ResponseWriter, r *http.Request, a auth.Account) {
+	cs, err := s.relay.Conclaves(r.Context(), a.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, cs)
+}
+
+// notifyConclave tells a Conclave's members (plus extra users) that its membership changed.
+func (s *Server) notifyConclave(ctx context.Context, id string, extra ...string) {
+	ids, err := s.relay.ConclaveMemberIDs(ctx, id)
+	if err != nil {
+		return
+	}
+	s.hub.Notify(append(ids, extra...), relay.Event{Type: "conclave", GroupID: id})
 }
 
 func (s *Server) groupEpoch(w http.ResponseWriter, r *http.Request, a auth.Account) {
@@ -80,6 +112,25 @@ func (s *Server) groupEpoch(w http.ResponseWriter, r *http.Request, a auth.Accou
 		return
 	}
 	writeJSON(w, map[string]int64{"epoch": epoch})
+}
+
+func (s *Server) groupDevices(w http.ResponseWriter, r *http.Request, a auth.Account) {
+	ds, err := s.relay.GroupDevices(r.Context(), r.PathValue("gid"), a.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, ds)
+}
+
+// notifyPeers tells userID and everyone sharing a space with them that
+// userID's devices changed, so their clients update MLS groups.
+func (s *Server) notifyPeers(ctx context.Context, userID, typ, detail string) {
+	peers, err := s.relay.Peers(ctx, userID)
+	if err != nil {
+		return
+	}
+	s.hub.Notify(peers, relay.Event{Type: typ, GroupID: detail})
 }
 
 func (s *Server) fetchMessages(w http.ResponseWriter, r *http.Request, a auth.Account) {
