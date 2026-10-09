@@ -15,10 +15,11 @@ import (
 )
 
 // The web client is embedded so the node serves it with no internet access.
-// Today this is an unstyled placeholder; the themed client lands after the
-// visual direction is approved.
+// It is built from client/ (npm run build writes here) and committed, so
+// `go build` needs no Node toolchain. "all:" keeps bundler chunks whose names
+// start with "_".
 //
-//go:embed web
+//go:embed all:web
 var webFS embed.FS
 
 // Version is set at build time with -ldflags "-X .../internal/server.Version=v0.1.0".
