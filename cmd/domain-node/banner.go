@@ -128,6 +128,10 @@ func statusLoop(ctx context.Context, srv *server.Server, interval time.Duration)
 			"out", humanBytes(cur.BytesOut),
 			"errors", fmt.Sprintf("%d (+%d)", cur.Errors, cur.Errors-prev.Errors),
 		)
+		if cs, ok := srv.CallStats(); ok && cs.Rooms > 0 {
+			slog.Info("calls", "rooms", cs.Rooms, "participants", cs.Participants,
+				"media_in", humanBytes(cs.BytesIn), "media_out", humanBytes(cs.BytesOut))
+		}
 		prev = cur
 	}
 }

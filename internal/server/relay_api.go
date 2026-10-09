@@ -84,6 +84,7 @@ func (s *Server) leaveConclave(w http.ResponseWriter, r *http.Request, a auth.Ac
 	err := s.relay.LeaveConclave(r.Context(), r.PathValue("id"), a.UserID)
 	if err == nil {
 		s.notifyConclave(r.Context(), r.PathValue("id"), a.UserID)
+		s.recheckCalls()
 	}
 	done(w, err)
 }

@@ -244,3 +244,24 @@ export async function showNotification(gid: string, title: string, body: string)
     console.warn("notification", e);
   }
 }
+
+// ---- call ringtone ----
+
+let ringTimer: number | undefined;
+
+/**
+ * The incoming call ringtone. PLACEHOLDER: a ringtone is a new sound and
+ * waits for Nathan's approval. Until then it repeats the approved message
+ * sound (the vacuum tube hum) every two seconds.
+ */
+export function startRingtone() {
+  if (ringTimer !== undefined) return;
+  playTone();
+  ringTimer = window.setInterval(playTone, 2000);
+}
+
+export function stopRingtone() {
+  if (ringTimer === undefined) return;
+  window.clearInterval(ringTimer);
+  ringTimer = undefined;
+}

@@ -41,9 +41,10 @@ export function apiUrl(path: string): string {
   return base + "/api/v1" + path;
 }
 
-export function streamUrl(): string {
+/** A WebSocket on the node: the event stream, or "/rtc" for call signalling. */
+export function streamUrl(path = "/stream"): string {
   const u = new URL(base || location.origin);
-  return `${u.protocol === "https:" ? "wss:" : "ws:"}//${u.host}/api/v1/stream`;
+  return `${u.protocol === "https:" ? "wss:" : "ws:"}//${u.host}/api/v1${path}`;
 }
 
 /**

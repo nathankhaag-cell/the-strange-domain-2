@@ -137,6 +137,30 @@ export interface ClaimedKeyPackage {
 }
 
 // Permission bits (internal/perm/perm.go).
+/** One person in a call (internal/rtc PartInfo). */
+export interface CallPart {
+  id: string;
+  user_id: string;
+  device_id: string;
+  muted: boolean;
+  camera: boolean;
+  screen: boolean;
+  can_speak: boolean;
+  joined: number;
+}
+
+/** A running call: a Voice Relay, or a call in a Confession or Conclave. */
+export interface CallRoom {
+  id: string;
+  relay: boolean;
+  started_at: number;
+  started_by: string;
+  ringing: boolean;
+  video: boolean;
+  declined: string[];
+  participants: CallPart[];
+}
+
 export const Perm = {
   ManageDomain: 1 << 0,
   ManageChannels: 1 << 1,
@@ -223,6 +247,9 @@ export const api = {
   sendWelcome: (gid: string, device_id: string, data: string) =>
     call<void>("POST", `/groups/${gid}/welcomes`, { device_id, data }),
   takeWelcomes: () => call<WireWelcome[]>("POST", "/welcomes/take"),
+
+  calls: () => call<CallRoom[]>("GET", "/calls"),
+  declineCall: (gid: string) => call<void>("POST", `/calls/${gid}/decline`),
 
   limits: () => call<Limits>("GET", "/limits"),
   /** Uploads an encrypted attachment (ciphertext only) for a group. */

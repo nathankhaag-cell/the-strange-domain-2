@@ -46,4 +46,14 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Calls. Android asks the person the first time a call needs the
+         microphone or camera: the client calls getUserMedia, and Capacitor's
+         WebChromeClient (BridgeWebChromeClient.onPermissionRequest) requests
+         these at that moment and grants the page only what was allowed. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

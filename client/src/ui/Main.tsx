@@ -27,6 +27,7 @@ import { Attachments, Avatar } from "./Media";
 import { SettingsModal } from "./Settings";
 import { NodeAdmin } from "./NodeAdmin";
 import { actorFor, canActOn, has, roleBadge } from "./perms";
+import { CallBar, CallButtons, ConclaveCall, IncomingCall, RelayRoster, VoicePane } from "./Call";
 import {
   AddDomainModal,
   ChannelModal,
@@ -141,6 +142,9 @@ export function Main() {
         </div>
       )}
 
+      <IncomingCall app={app} />
+      <CallBar app={app} />
+
       {app.askNotify && (
         <div class="banner">
           <span>Show a notification when a message arrives? Notifications only say which chat has a new message, not what it says.</span>
@@ -209,7 +213,16 @@ export function Main() {
         </div>
 
         <main class="pane">
-          {app.selGroup ? (
+          {app.selGroup && !conclave && detail?.channels.some((c) => c.id === app.selGroup && c.kind === "voice") ? (
+            <VoicePane
+              key={app.selGroup}
+              app={app}
+              groupId={app.selGroup}
+              detail={detail}
+              onMenu={() => setDrawer("left")}
+              onToggleMembers={() => setDrawer(drawer === "right" ? null : "right")}
+            />
+          ) : app.selGroup ? (
             <MessagePane
               key={app.selGroup}
               app={app}
@@ -313,7 +326,6 @@ function Sidebar({ app, openModal, onNavigate }: { app: AppState; openModal: (m:
   const ownerRole = detail?.roles.find((r) => r.rank === RANK_OWNER);
   const myMember = detail?.members.find((m) => m.user_id === app.me?.user_id);
   const myRole = detail?.roles.find((r) => r.id === myMember?.role_id);
-  const [voiceNote, setVoiceNote] = useState(false);
   const confessions = app.conclaves.filter((c) => c.members.length === 2);
   const conclaves = app.conclaves.filter((c) => c.members.length !== 2);
 
@@ -368,12 +380,20 @@ function Sidebar({ app, openModal, onNavigate }: { app: AppState; openModal: (m:
           {detail.channels
             .filter((c) => c.kind === "voice")
             .map((c) => (
-              <button type="button" class="chan voice" onClick={() => setVoiceNote(!voiceNote)}>
-                <Speaker />
-                {c.name}
-              </button>
+              <>
+                <button
+                  type="button"
+                  class={c.id === app.selGroup ? "chan voice active" : "chan voice"}
+                  aria-current={c.id === app.selGroup ? "true" : undefined}
+                  onClick={() => go(c.id)}
+                >
+                  <Speaker />
+                  <span class="chan-name">{c.name}</span>
+                  {app.call?.gid === c.id && <span class="tag">IN CALL</span>}
+                </button>
+                <RelayRoster app={app} gid={c.id} />
+              </>
             ))}
-          {voiceNote && <div class="muted small">Voice is not available in this client yet.</div>}
         </div>
       )}
 
@@ -552,6 +572,7 @@ function MessagePane(props: {
           </div>
         </div>
         <div class="grow" />
+        {conclave && <CallButtons app={app} groupId={groupId} />}
         <button
           type="button"
           class="btn-small"
@@ -567,6 +588,8 @@ function MessagePane(props: {
           </button>
         )}
       </div>
+
+      {conclave && <ConclaveCall app={app} groupId={groupId} />}
 
       <div
         class={dragging ? "messages dragging" : "messages"}

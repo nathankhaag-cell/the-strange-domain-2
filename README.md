@@ -18,12 +18,13 @@ Phase 0, foundations. What exists today:
 - Attachments (pictures, GIFs, PDFs, any file): each file is encrypted on the device with a fresh AES-256-GCM key; the node stores only the ciphertext on disk (`<data>/blobs`), and the key, hash, name and type travel inside the MLS message. PNG, JPEG, GIF and WebP show inline; everything else (SVG and HTML included) is download only. Size cap and per-person quota: `-max-upload-mb`, `-upload-quota-mb`.
 - Profile pictures, cropped and re-encoded to a 256 px square on the device. These are **not** end-to-end encrypted: like callsigns, the node stores them and serves them to people who share a domain or Conclave.
 - Unread counts, a short sound and OS notifications for new messages (no message text unless previews are turned on in Settings), with per-chat mute. On phones, the chat fills the screen and the domain list and member list are drawers.
+- Voice and video calls, end-to-end encrypted: Voice Relays in each domain (join, leave, see who is in, mute, push to talk, speaking indicator, camera and screen sharing) and calls in Confessions and Conclaves (ring, answer, decline, hang up). The node runs a small media relay (an SFU, `internal/rtc`, built on [pion/webrtc](https://github.com/pion/webrtc), pure Go) that forwards each person's media to the others over UDP (one port, 8745, by default; LAN addresses work with no internet). Every audio and video frame is encrypted in the client with AES-256-GCM (WebRTC encoded transforms) under a key exported from the chat's MLS group, which changes whenever the group's epoch does; the node only ever relays sealed frames. Browsers that cannot transform encoded frames refuse to join rather than send media unencrypted. Ports, NAT and options: [docs/INSTALL.md](docs/INSTALL.md#voice-and-video-calls).
 
 Default roles in every new domain, highest first: **Abbot** (owner), **Bishop** (senior moderator), **Warden** (moderator), **Brother / Sister** (member, given to people who join by Summons) and **Postulant** (new or unverified). Owners can rename them.
 
 Desktop apps (Windows, macOS, Linux) and an Android app are thin shells around the same client: they ask for the node's address on first start. Releases with every download are built by GitHub Actions; see [docs/INSTALL.md](docs/INSTALL.md).
 
-Not built yet: voice, history transfer between devices, the Codex (audit log) view, and an iOS app.
+Not built yet: history transfer between devices, the Codex (audit log) view, and an iOS app.
 
 ## Run it
 
@@ -34,6 +35,8 @@ go run ./cmd/domain-node -listen :8743
 Then open http://localhost:8743. Data goes to your user config folder (`%AppData%\strange-domain` on Windows, `~/Library/Application Support/strange-domain` on macOS, `~/.config/strange-domain` on Linux) unless you pass `-data <dir>`.
 
 At start-up the node prints every address it can be opened at. It logs a one-line traffic `status` every minute (`-status-interval`, `0` turns it off), logs each request with `-log-level debug`, and checks GitHub for a newer release (`-update-check=false` turns that off; failures are silent). The first account on the node (its administrator) has a **Node admin** view in the client with live counters, backed by `GET /api/v1/admin/stats`.
+
+**Calls** use UDP port 8745 for media (`-rtc-udp-port`; `-rtc-public-ip` behind NAT, `-rtc-video=false` for voice only, `-rtc=false` to turn calls off). See [docs/INSTALL.md](docs/INSTALL.md#voice-and-video-calls) for firewall and port-forwarding steps.
 
 **Installing and releases:** [docs/INSTALL.md](docs/INSTALL.md) covers downloading the apps, running the node on a Raspberry Pi, and cutting a release (push a `v*` tag, or Actions > Release > Run workflow).
 
@@ -89,6 +92,7 @@ internal/perm       permissions and rank rules
 internal/domains    domains, roles, invites, moderation, channels
 internal/auth       accounts, device keys, sign-in and sessions
 internal/relay      MLS delivery service, Conclaves and live push
+internal/rtc        media relay (SFU) for voice and video calls
 internal/server     HTTP API and the embedded web client (built output in internal/server/web)
 internal/tlsutil    HTTPS: self-signed certificate and fingerprints
 client/             web client sources (TypeScript, Preact, Vite)

@@ -8,6 +8,7 @@ import {
   ApiError,
   setToken,
   setUnauthorizedHandler,
+  type CallRoom,
   type Conclave,
   type Device,
   type Domain,
@@ -47,8 +48,11 @@ import {
   requestPermission,
   savePrefs,
   showNotification,
+  startRingtone,
+  stopRingtone,
   type NotifyPrefs,
 } from "./notify";
+import { CallSession, type CallView } from "./call/session";
 
 export type Honorific = "Brother" | "Sister";
 
@@ -77,6 +81,14 @@ export interface AppState {
   /** Show the one-time offer to turn on notifications. */
   askNotify: boolean;
   limits?: Limits;
+  /** Running calls this person may join (Voice Relays and Conclave calls). */
+  rooms: CallRoom[];
+  /** The call this device is in. */
+  call?: CallView;
+  /** Why the last call ended, shown in its pane until another starts. */
+  callNotice?: { gid: string; text: string };
+  /** A Conclave call ringing for this person. */
+  incoming?: { gid: string; by: string; video: boolean; key: string };
 }
 
 // The session belongs to one node (see node.ts).
@@ -128,6 +140,7 @@ let state: AppState = {
   mutedChats: lsJSON<string[]>(MUTED_KEY, []),
   notifyPrefs: loadPrefs(),
   askNotify: false,
+  rooms: [],
 };
 const subs = new Set<() => void>();
 
@@ -237,7 +250,7 @@ export function chatLabel(gid: string): string {
   return "a chat";
 }
 
-function callsignOf(uid: string): string {
+export function callsignOf(uid: string): string {
   for (const d of Object.values(state.details)) {
     const m = d.members.find((x) => x.user_id === uid);
     if (m) return m.callsign;
@@ -384,6 +397,7 @@ export async function recoverAccount(callsign: string, code: string, deviceName:
 
 /** Wipes every key, message and setting this browser holds for the node. */
 export async function forgetDevice() {
+  leaveCall();
   stream?.close();
   stream = null;
   engine = null;
@@ -403,6 +417,7 @@ export async function signOut() {
 }
 
 async function endSession(notice?: string) {
+  leaveCall();
   stream?.close();
   stream = null;
   engine = null;
@@ -417,7 +432,10 @@ async function startMain() {
   const me = await api.me();
   set({ me, notice: undefined });
   const c = new MlsCrypto({ userId: me.user_id, deviceId: me.device_id });
-  c.onChange(() => set({ rev: state.rev + 1 }));
+  c.onChange((gid) => {
+    set({ rev: state.rev + 1 });
+    if (session?.gid === gid) session.groupChanged(); // a new epoch means a new call key
+  });
   c.onIncoming(onIncoming);
   onNotificationOpen((gid) => void openGroup(gid));
   await c.start();
@@ -428,6 +446,7 @@ async function startMain() {
   setUnread(state.unread);
   // Older nodes have no attachments and no limits endpoint (see compat.ts).
   if (nodeHas(state.info, "attachments")) void api.limits().then((limits) => set({ limits }), () => undefined);
+  void refreshCalls();
   if (!askedBefore() && (await permission()) === "default") set({ askNotify: true });
   if (!state.selDomain && state.domains[0]) await selectDomain(state.domains[0].id);
   stream = new Stream(onEvent, (online) => {
@@ -442,7 +461,7 @@ async function resync() {
   if (!c) return;
   try {
     await c.takeWelcomes();
-    await Promise.all([refreshDomains(), refreshConclaves()]);
+    await Promise.all([refreshDomains(), refreshConclaves(), refreshCalls()]);
     for (const gid of allGroupIds()) await c.sync(gid);
   } catch (e) {
     console.warn("resync", e);
@@ -451,7 +470,8 @@ async function resync() {
 
 function allGroupIds(): string[] {
   const ids: string[] = [];
-  for (const d of Object.values(state.details)) for (const ch of d.channels) if (ch.kind === "text") ids.push(ch.id);
+  // Voice Relays are MLS groups too: their epoch secrets give the call keys.
+  for (const d of Object.values(state.details)) for (const ch of d.channels) ids.push(ch.id);
   for (const c of state.conclaves) ids.push(c.id);
   return ids;
 }
@@ -537,9 +557,12 @@ async function onEvent(ev: StreamEvent) {
         const known = state.domains.some((d) => d.id === ev.group_id);
         if (!known || !(await refreshDetail(ev.group_id!))) await refreshDomains();
         const d = state.details[ev.group_id!];
-        if (d) for (const ch of d.channels) if (ch.kind === "text") scheduleReconcile(ch.id);
+        if (d) for (const ch of d.channels) scheduleReconcile(ch.id);
         break;
       }
+      case "call":
+        await refreshCalls();
+        break;
       case "conclave":
         await refreshConclaves();
         if (state.conclaves.some((x) => x.id === ev.group_id)) scheduleReconcile(ev.group_id!);
@@ -666,4 +689,146 @@ export async function revokeDevice(id: string) {
   }
   await refreshDevices();
   for (const gid of allGroupIds()) if (engine?.status(gid) === "ready") scheduleReconcile(gid);
+}
+
+// ---- calls ----
+
+let session: CallSession | null = null;
+/** Rings this device has stopped (declined, or answered here): "<gid>:<started_at>". */
+const stoppedRings = new Set<string>();
+/** When this device first saw each ring, to stop ringing after a minute. */
+const ringSeen = new Map<string, number>();
+const RING_MS = 60_000;
+let ringCheck: number | undefined;
+
+export function callsAvailable(): boolean {
+  // Unlike other features, calls stay off until the node says it has them
+  // (they can be turned off with -rtc=false).
+  return !!state.info?.features?.includes("calls");
+}
+
+export function isVoiceRelay(gid: string): boolean {
+  return Object.values(state.details).some((d) => d.channels.some((c) => c.id === gid && c.kind === "voice"));
+}
+
+export function getCall(): CallSession | null {
+  return session;
+}
+
+export async function refreshCalls() {
+  if (!callsAvailable()) return;
+  try {
+    set({ rooms: await api.calls() });
+  } catch {
+    return; // offline; the next event or resync refreshes
+  }
+  updateIncoming();
+  const c = state.call && state.conclaves.find((x) => x.id === state.call?.gid);
+  if (session && c && state.me) {
+    const room = state.rooms.find((r) => r.id === c.id);
+    if (room) session.view.declined = room.declined;
+    session.checkDeclined(c.members.map((m) => m.user_id), state.me.user_id);
+  }
+}
+
+/** Finds a Conclave call ringing for this person and rings (or stops). */
+function updateIncoming() {
+  const me = state.me?.user_id;
+  let incoming: AppState["incoming"];
+  const now = Date.now();
+  for (const r of state.rooms) {
+    if (!me || r.relay || !r.ringing || r.started_by === me) continue;
+    const key = `${r.id}:${r.started_at}`;
+    if (stoppedRings.has(key) || session?.gid === r.id) continue;
+    if (r.participants.some((p) => p.user_id === me)) continue; // answered on another device
+    if (r.declined.includes(me)) continue; // declined on another device
+    if (!state.conclaves.some((c) => c.id === r.id)) continue;
+    if (!ringSeen.has(key)) ringSeen.set(key, now);
+    if (now - ringSeen.get(key)! > RING_MS) continue;
+    incoming = { gid: r.id, by: r.started_by, video: r.video, key };
+    break;
+  }
+  const was = state.incoming?.key;
+  set({ incoming });
+  window.clearTimeout(ringCheck);
+  if (incoming) ringCheck = window.setTimeout(updateIncoming, 5000);
+  if (incoming && incoming.key !== was) {
+    const muted = state.mutedChats.includes(incoming.gid);
+    if (state.notifyPrefs.sound && !muted) startRingtone();
+    if (state.notifyPrefs.notify && !muted) {
+      void showNotification(incoming.gid, incoming.video ? "Incoming video call" : "Incoming call", `From ${chatLabel(incoming.gid)}`);
+    }
+  } else if (!incoming) {
+    stopRingtone();
+  }
+}
+
+/** Joins a Voice Relay, or starts (ring) or answers a Conclave call. */
+export async function joinCall(gid: string, opts: { ring?: boolean; video?: boolean } = {}) {
+  const c = engine;
+  if (!c || !state.me) return;
+  if (session?.gid === gid) return;
+  session?.end();
+  stopRingtone();
+  const relay = isVoiceRelay(gid);
+  let wantMic = true;
+  if (relay) {
+    const d = Object.values(state.details).find((x) => x.channels.some((ch) => ch.id === gid));
+    wantMic = !d?.members.find((m) => m.user_id === state.me?.user_id)?.muted;
+  }
+  const room = state.rooms.find((r) => r.id === gid);
+  if (room) stoppedRings.add(`${gid}:${room.started_at}`);
+  const s = new CallSession({
+    gid,
+    relay,
+    ring: !!opts.ring && !relay && !(room && room.participants.length > 0),
+    video: !!opts.video,
+    wantMic,
+    engine: c,
+    nameOf: callsignOf,
+    onUpdate: (v) => {
+      if (session === s) set({ call: v });
+    },
+    onEnd: (reason) => {
+      if (session !== s) return;
+      session = null;
+      set({ call: undefined, callNotice: reason ? { gid, text: reason } : undefined });
+      void refreshCalls();
+    },
+  });
+  session = s;
+  set({ call: { ...s.view }, callNotice: undefined, incoming: undefined });
+  try {
+    await s.start();
+  } catch (e) {
+    s.end(e instanceof Error ? e.message : String(e));
+  }
+}
+
+export function leaveCall() {
+  session?.end();
+}
+
+export async function answerCall() {
+  const inc = state.incoming;
+  if (!inc) return;
+  await openGroup(inc.gid);
+  await joinCall(inc.gid, { video: inc.video });
+}
+
+export async function declineCall() {
+  const inc = state.incoming;
+  if (!inc) return;
+  stoppedRings.add(inc.key);
+  stopRingtone();
+  set({ incoming: undefined });
+  try {
+    await api.declineCall(inc.gid);
+  } catch {
+    /* the call already ended */
+  }
+}
+
+export function dismissCallNotice() {
+  set({ callNotice: undefined });
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/rtc"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/update"
 )
 
@@ -55,6 +56,7 @@ type adminStatsJSON struct {
 	Domains      []domainStats  `json:"domains"`
 	RecentErrors []ErrorEntry   `json:"recent_errors"`
 	Update       *update.Status `json:"update"`
+	Calls        *rtc.Stats     `json:"calls,omitempty"` // nil: calls are off
 }
 
 func (s *Server) adminStats(w http.ResponseWriter, r *http.Request, a auth.Account) {
@@ -73,6 +75,11 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request, a auth.Accou
 		writeErr(w, err)
 		return
 	}
+	var calls *rtc.Stats
+	if s.rtc != nil {
+		st := s.rtc.Stats()
+		calls = &st
+	}
 	writeJSON(w, adminStatsJSON{
 		Version:      Version,
 		Platform:     runtime.GOOS + "/" + runtime.GOARCH,
@@ -84,6 +91,7 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request, a auth.Accou
 		Domains:      ds,
 		RecentErrors: s.metrics.RecentErrors(),
 		Update:       s.updates.Status(),
+		Calls:        calls,
 	})
 }
 

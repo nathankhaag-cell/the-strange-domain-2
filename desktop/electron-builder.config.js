@@ -48,6 +48,14 @@ module.exports = {
     // would reject Electron's own frameworks under an ad-hoc signature.
     identity: macCert ? undefined : "-",
     hardenedRuntime: macCert,
+    // Calls: macOS asks before an app uses the microphone or camera and
+    // shows these reasons.
+    extendInfo: {
+      NSMicrophoneUsageDescription: "The Strange Domain uses the microphone for voice and video calls.",
+      NSCameraUsageDescription: "The Strange Domain uses the camera for video calls.",
+    },
+    entitlements: macCert ? "build/entitlements.mac.plist" : undefined,
+    entitlementsInherit: macCert ? "build/entitlements.mac.plist" : undefined,
   },
   dmg: {
     artifactName: "The-Strange-Domain-${version}-macos-${arch}.${ext}",

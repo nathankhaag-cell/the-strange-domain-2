@@ -12,7 +12,7 @@
 // SHA-256 fingerprint the person confirmed, and only for that node.
 "use strict";
 
-const { app, BrowserWindow, Menu, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, desktopCapturer, dialog, ipcMain, session, shell } = require("electron");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -234,6 +234,29 @@ function fingerprintOf(pem) {
   }
 }
 
+/**
+ * Asks which screen or window to share. Resolves to a desktopCapturer
+ * source, or null when the person cancels.
+ */
+async function chooseScreen(parent) {
+  const sources = await desktopCapturer.getSources({ types: ["screen", "window"], thumbnailSize: { width: 0, height: 0 } });
+  if (sources.length === 0) return null;
+  // Screens first, then windows; a dialog has room for a handful of buttons.
+  const shown = sources.slice(0, 8);
+  const buttons = [...shown.map((s, i) => (s.id.startsWith("screen:") ? `Screen ${i + 1}` : s.name.slice(0, 40) || "Window")), "Cancel"];
+  const { response } = await dialog.showMessageBox(parent, {
+    type: "question",
+    title: "Share screen",
+    message: "Share screen",
+    detail: "Choose what to share in this call.",
+    buttons,
+    cancelId: buttons.length - 1,
+    defaultId: 0,
+    noLink: true,
+  });
+  return response < shown.length ? shown[response] : null;
+}
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const template = [
@@ -291,13 +314,30 @@ if (!app.requestSingleInstanceLock()) {
       callback(-3);
     });
 
-    // The client needs no camera, microphone or location yet. It asks to copy
-    // (link codes, recovery codes) and to show message notifications.
-    const allowed = new Set(["clipboard-sanitized-write", "notifications"]);
+    // The client asks to copy (link codes, recovery codes), to show
+    // notifications, and for the microphone, camera and screen in calls.
+    // Only the chosen node's pages get any of these; never location or
+    // anything else.
+    const allowed = new Set(["clipboard-sanitized-write", "notifications", "media", "display-capture"]);
     ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
+      if (permission === "media") {
+        const types = details.mediaTypes ?? [];
+        callback(onNode(details.requestingUrl) && types.every((t) => t === "audio" || t === "video"));
+        return;
+      }
       callback(allowed.has(permission) && onNode(details.requestingUrl));
     });
     ses.setPermissionCheckHandler((_wc, permission, requestingOrigin) => allowed.has(permission) && onNode(requestingOrigin));
+
+    // Screen sharing (getDisplayMedia): Electron has no picker of its own, so
+    // ask which screen or window to share in a plain dialog.
+    ses.setDisplayMediaRequestHandler((request, callback) => {
+      const origin = request.securityOrigin || request.frame?.url;
+      if (!win || !onNode(origin)) return callback({});
+      chooseScreen(win)
+        .then((source) => callback(source ? { video: source } : {}))
+        .catch(() => callback({}));
+    });
 
     buildMenu();
     createWindow();

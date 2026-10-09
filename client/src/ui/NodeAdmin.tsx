@@ -30,6 +30,24 @@ export interface AdminStats {
   domains: { id: string; name: string; members: number; online: number; channels: number; messages: number }[];
   recent_errors: { time: number; route: string; status: number }[];
   update: { current: string; latest: string; url: string; available: boolean } | null;
+  /** Absent when calls are off (-rtc=false) or on older nodes. */
+  calls?: {
+    rooms: number;
+    participants: number;
+    bytes_in: number;
+    bytes_out: number;
+    in_bps: number;
+    out_bps: number;
+    video: boolean;
+    udp_port?: number;
+    tcp_port?: number;
+  };
+}
+
+function fmtRate(bps: number): string {
+  if (bps < 1000) return `${bps} bit/s`;
+  if (bps < 1_000_000) return `${(bps / 1000).toFixed(0)} kbit/s`;
+  return `${(bps / 1_000_000).toFixed(1)} Mbit/s`;
 }
 
 const POLL_MS = 2000;
@@ -155,6 +173,26 @@ export function NodeAdmin({ onClose }: { onClose: () => void }) {
                 Rejected requests (4xx): {t.rejected}. Counts start when the node starts. Updated every 2 seconds.
               </p>
             </section>
+
+            {stats.calls && (
+              <section>
+                <h3>Calls</h3>
+                <dl class="stat-grid admin-grid" aria-live="off">
+                  <Stat label="Calls now" value={stats.calls.rooms} />
+                  <Stat label="People in calls" value={stats.calls.participants} />
+                  <Stat label="Media in" value={fmtRate(stats.calls.in_bps)} />
+                  <Stat label="Media out" value={fmtRate(stats.calls.out_bps)} />
+                  <Stat label="Media data in" value={fmtBytes(stats.calls.bytes_in)} />
+                  <Stat label="Media data out" value={fmtBytes(stats.calls.bytes_out)} />
+                </dl>
+                <p class="small muted">
+                  Call media is end-to-end encrypted; the node forwards it without being able to hear or see it.{" "}
+                  {stats.calls.udp_port ? `UDP port ${stats.calls.udp_port}` : "UDP ports chosen per call"}
+                  {stats.calls.tcp_port ? `, TCP port ${stats.calls.tcp_port}` : ""}. Video{" "}
+                  {stats.calls.video ? "on" : "off"}.
+                </p>
+              </section>
+            )}
 
             <section>
               <h3>Node</h3>

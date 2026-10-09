@@ -360,6 +360,7 @@ func (s *Server) notifyDomain(ctx context.Context, domainID string, extra ...str
 func (s *Server) domainDone(w http.ResponseWriter, r *http.Request, err error, extra ...string) {
 	if err == nil {
 		s.notifyDomain(r.Context(), r.PathValue("id"), extra...)
+		s.recheckCalls() // kicks, bans, mutes and role changes apply to calls too
 	}
 	done(w, err)
 }
