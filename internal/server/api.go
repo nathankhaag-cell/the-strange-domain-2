@@ -357,6 +357,8 @@ func writeErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, domains.ErrAlreadyMember), errors.Is(err, auth.ErrCallsignTaken),
 		errors.Is(err, auth.ErrDeviceKnown), errors.Is(err, relay.ErrStaleEpoch):
 		status = http.StatusConflict
+	case errors.Is(err, auth.ErrTooManyDevices):
+		status = http.StatusForbidden
 	case errors.Is(err, relay.ErrNoKeys):
 		status = http.StatusNotFound
 	case errors.Is(err, relay.ErrTooLarge):

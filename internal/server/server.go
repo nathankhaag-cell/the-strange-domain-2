@@ -40,6 +40,7 @@ func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Serv
 	s.mux.HandleFunc("GET /api/v1/info", s.info)
 	s.routes()
 	s.relayRoutes()
+	s.deviceRoutes()
 	web, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /", http.FileServer(http.FS(web)))
 	return s

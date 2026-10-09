@@ -163,4 +163,39 @@ CREATE TABLE mls_welcomes (
 );
 CREATE INDEX mls_welcomes_device ON mls_welcomes(device_id, id);
 `,
+	`
+-- Several devices per account.
+
+-- A signed-in device issues a short-lived, single-use code; a new device
+-- presents it to register its own key under the same account.
+CREATE TABLE device_link_codes (
+	code_hash  TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	expires_at INTEGER NOT NULL
+);
+
+-- Recovery: the client derives a key pair from a recovery code the person
+-- writes down; the node keeps only the public key.
+ALTER TABLE users ADD COLUMN recovery_pk BLOB;
+CREATE TABLE recovery_challenges (
+	nonce      BLOB PRIMARY KEY,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	expires_at INTEGER NOT NULL
+);
+
+-- History transfer: an old device sends message history, encrypted on the
+-- device for the new device's key, in chunks the new device takes once.
+CREATE TABLE device_transfers (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	to_device   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+	from_device TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+	transfer_id TEXT NOT NULL,
+	chunk       INTEGER NOT NULL,
+	total       INTEGER NOT NULL,
+	data        BLOB NOT NULL,
+	created_at  INTEGER NOT NULL,
+	UNIQUE (transfer_id, chunk)
+);
+CREATE INDEX device_transfers_to ON device_transfers(to_device, id);
+`,
 }
