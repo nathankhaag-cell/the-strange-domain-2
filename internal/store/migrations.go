@@ -87,4 +87,24 @@ CREATE TABLE audit_log (
 );
 CREATE INDEX audit_log_domain ON audit_log(domain_id, id);
 `,
+	`
+-- The first account on a node becomes its administrator.
+ALTER TABLE users ADD COLUMN is_node_admin INTEGER NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX devices_identity_pk ON devices(identity_pk);
+
+-- Single-use sign-in challenges, signed by the device's identity key.
+CREATE TABLE auth_challenges (
+	nonce      BLOB PRIMARY KEY,
+	device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+	expires_at INTEGER NOT NULL
+);
+
+-- Sessions store only a SHA-256 hash of the bearer token.
+CREATE TABLE sessions (
+	token_hash TEXT PRIMARY KEY,
+	device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+	user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	expires_at INTEGER NOT NULL
+);
+`,
 }
