@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/blobs"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
@@ -33,6 +34,7 @@ type Server struct {
 	auth    *auth.Service
 	relay   *relay.Service
 	hub     *relay.Hub
+	blobs   *blobs.Service
 	started time.Time
 	mux     *http.ServeMux
 	handler http.Handler
@@ -40,19 +42,43 @@ type Server struct {
 	updates *update.Checker
 }
 
-func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Service, hub *relay.Hub) *Server {
-	s := &Server{st: st, dom: dom, auth: au, relay: rl, hub: hub, started: time.Now(), mux: http.NewServeMux(), metrics: newMetrics()}
+// Option configures a Server.
+type Option func(*Server)
+
+// WithUploadLimits sets the largest attachment (bytes) and how much
+// attachment data each person may keep on the node. Zero keeps the default.
+func WithUploadLimits(maxSize, quota int64) Option {
+	return func(s *Server) {
+		if maxSize > 0 {
+			s.blobs.MaxSize = maxSize
+		}
+		if quota > 0 {
+			s.blobs.Quota = quota
+		}
+	}
+}
+
+func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Service, hub *relay.Hub, opts ...Option) *Server {
+	s := &Server{st: st, dom: dom, auth: au, relay: rl, hub: hub, blobs: blobs.NewService(st), started: time.Now(), mux: http.NewServeMux(), metrics: newMetrics()}
+	for _, o := range opts {
+		o(s)
+	}
 	s.mux.HandleFunc("GET /healthz", s.healthz)
 	s.mux.HandleFunc("GET /api/v1/info", s.info)
 	s.routes()
 	s.relayRoutes()
 	s.deviceRoutes()
+	s.mediaRoutes()
 	s.adminRoutes()
 	web, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /", http.FileServer(http.FS(web)))
 	s.handler = s.instrument(http.HandlerFunc(s.serve))
 	return s
 }
+
+// csp allows images from blob: URLs only so the client can show attachments
+// and profile pictures it decrypted or fetched itself; nothing else changes.
+const csp = "default-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'"
 
 // Metrics returns the node's traffic counters.
 func (s *Server) Metrics() *Metrics { return s.metrics }
@@ -68,7 +94,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", csp)
 	if allowAppOrigin(w, r) {
 		return // preflight answered
 	}
@@ -132,5 +158,9 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		"version":  Version,
 		"platform": runtime.GOOS + "/" + runtime.GOARCH,
 		"uptime_s": int(time.Since(s.started).Seconds()),
+		// See compat.go.
+		"api":            APILevel,
+		"min_client_api": MinClientAPI,
+		"features":       Features,
 	})
 }

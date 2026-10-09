@@ -2,6 +2,8 @@
 // never sees plaintext: everything sent to /groups/{gid}/messages is an MLS
 // message produced here.
 
+import type { FileRef } from "../files";
+
 export interface ShownMessage {
   seq: number;
   groupId: string;
@@ -11,6 +13,8 @@ export interface ShownMessage {
   /** ok: decrypted; redacted: deleted on the node; unavailable: this device cannot read it. */
   state: "ok" | "redacted" | "unavailable";
   text?: string;
+  /** Attachments: each file's blob id, key and metadata (see files.ts). */
+  files?: FileRef[];
 }
 
 /**
@@ -28,8 +32,8 @@ export interface MessageCrypto {
   messages(groupId: string): ShownMessage[];
   /** Fetch new messages for a group and decrypt them. */
   sync(groupId: string): Promise<void>;
-  /** Encrypt and send a text message, creating the group first if nobody has. */
-  send(groupId: string, text: string): Promise<void>;
+  /** Encrypt and send a message, creating the group first if nobody has. Files must already be uploaded. */
+  send(groupId: string, text: string, files?: FileRef[]): Promise<void>;
   /** Show a deleted message as redacted and forget its plaintext. */
   markDeleted(groupId: string, seq: number): Promise<void>;
   /** Join any groups this device has been welcomed into. Returns their ids. */
@@ -38,4 +42,6 @@ export interface MessageCrypto {
   reconcile(groupId: string): Promise<void>;
   /** Called after any change the UI should show. */
   onChange(fn: (groupId: string) => void): void;
+  /** Called for each message from another device that was just decrypted. */
+  onIncoming(fn: (m: ShownMessage) => void): void;
 }

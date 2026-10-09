@@ -17,8 +17,9 @@ import (
 
 // Store wraps the node's database.
 type Store struct {
-	DB  *sql.DB
-	Dir string // the data directory
+	DB *sql.DB
+	// Dir is the node's data directory; large files (attachments) live under it.
+	Dir string
 }
 
 // Open opens (creating if needed) the database in dataDir and applies migrations.

@@ -34,6 +34,8 @@ type options struct {
 	tlsCert       string
 	tlsKey        string
 	tlsSelfSigned bool
+	maxUploadMB   int64
+	uploadQuotaMB int64
 
 	statusInterval time.Duration // 0: no status line
 	updateCheck    bool
@@ -48,6 +50,8 @@ func main() {
 	flag.StringVar(&o.tlsKey, "tls-key", "", "private key for -tls-cert (PEM file)")
 	flag.BoolVar(&o.tlsSelfSigned, "tls-self-signed", false, "serve HTTPS with a self-signed certificate kept in <data>/tls (made on first start)")
 	flag.StringVar(&o.tlsListen, "tls-listen", "", "with a TLS option: serve HTTPS on this address and keep plain HTTP on -listen (for example :8744)")
+	flag.Int64Var(&o.maxUploadMB, "max-upload-mb", 25, "largest attachment people can send, in MB")
+	flag.Int64Var(&o.uploadQuotaMB, "upload-quota-mb", 1024, "attachment storage each person may use on this node, in MB")
 	flag.DurationVar(&o.statusInterval, "status-interval", time.Minute, "log a one-line traffic summary this often (0 turns it off)")
 	flag.BoolVar(&o.updateCheck, "update-check", true, "check GitHub for a newer release at start-up and once a day (needs internet; failures are ignored)")
 	logLevel := flag.String("log-level", "info", "log detail: debug (also logs every request), info, warn or error")
@@ -114,7 +118,8 @@ func run(ctx context.Context, o options, ready func(httpAddr, httpsAddr net.Addr
 	defer st.Close()
 	dom := domains.NewService(st)
 	hub := relay.NewHub()
-	handler := server.New(st, dom, auth.NewService(st, dom), relay.NewService(st, hub), hub)
+	handler := server.New(st, dom, auth.NewService(st, dom), relay.NewService(st, hub), hub,
+		server.WithUploadLimits(o.maxUploadMB<<20, o.uploadQuotaMB<<20))
 	var updates *update.Checker
 	if o.updateCheck {
 		updates = &update.Checker{Current: server.Version}

@@ -43,6 +43,7 @@ import { makeKeyPackageRef } from "ts-mls/keyPackage.js";
 import { api, ApiError, type GroupDevice, type WireMessage } from "../api";
 import { fromB64, fromUtf8, toB64, toHex, utf8 } from "../b64";
 import * as idb from "../idb";
+import { parseFileRef, type FileRef } from "../files";
 import type { GroupStatus, MessageCrypto, ShownMessage } from "./types";
 
 const SUITE = "MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519" as const;
@@ -107,6 +108,7 @@ export class MlsCrypto implements MessageCrypto {
   private groups = new Map<string, GroupRec>();
   private locks = new Map<string, Promise<unknown>>();
   private listeners: ((gid: string) => void)[] = [];
+  private incoming: ((m: ShownMessage) => void)[] = [];
 
   constructor(private me: { userId: string; deviceId: string }) {
     this.config = {
@@ -123,6 +125,10 @@ export class MlsCrypto implements MessageCrypto {
 
   onChange(fn: (gid: string) => void) {
     this.listeners.push(fn);
+  }
+
+  onIncoming(fn: (m: ShownMessage) => void) {
+    this.incoming.push(fn);
   }
 
   private emit(gid: string) {
@@ -255,6 +261,7 @@ export class MlsCrypto implements MessageCrypto {
       createdAt: m.created_at,
     };
     let shown: ShownMessage | undefined;
+    let fresh: ShownMessage | undefined;
     let consumed: Uint8Array[] = [];
     // A Welcome may arrive after the messages that follow it; remember where
     // to start again once we have group state.
@@ -277,10 +284,14 @@ export class MlsCrypto implements MessageCrypto {
           rec.state = r.newState;
           consumed = r.consumed;
           if (r.kind === "applicationMessage") {
-            const body = JSON.parse(fromUtf8.decode(r.message)) as { text?: unknown; from?: unknown };
+            const body = JSON.parse(fromUtf8.decode(r.message)) as { text?: unknown; from?: unknown; files?: unknown };
             // The node's sender metadata must match what the sender sealed inside.
             if (typeof body.text === "string" && body.from === m.sender_device) {
-              shown = { ...base, state: "ok", text: body.text };
+              const files = Array.isArray(body.files)
+                ? body.files.slice(0, 10).map(parseFileRef).filter((f): f is FileRef => !!f)
+                : [];
+              shown = { ...base, state: "ok", text: body.text, ...(files.length ? { files } : {}) };
+              fresh = shown;
             }
           }
         } catch (e) {
@@ -318,6 +329,15 @@ export class MlsCrypto implements MessageCrypto {
     if (!rec.state) rec.status = "waiting";
     await this.persist(gid, rec, shown);
     for (const c of consumed) zeroOutUint8Array(c);
+    if (fresh) {
+      for (const fn of this.incoming) {
+        try {
+          fn(fresh);
+        } catch (e) {
+          console.warn("incoming listener", e);
+        }
+      }
+    }
   }
 
   async markDeleted(gid: string, seq: number) {
@@ -325,7 +345,7 @@ export class MlsCrypto implements MessageCrypto {
       const rec = await this.load(gid);
       const prev = rec.messages.get(seq);
       if (!prev) return;
-      const shown: ShownMessage = { ...prev, state: "redacted", text: undefined };
+      const shown: ShownMessage = { ...prev, state: "redacted", text: undefined, files: undefined };
       rec.messages.set(seq, shown);
       await idb.put("plaintext", plainKey(gid, seq), shown);
     });
@@ -392,7 +412,7 @@ export class MlsCrypto implements MessageCrypto {
 
   // ---- sending ----
 
-  send(gid: string, text: string): Promise<void> {
+  send(gid: string, text: string, files: FileRef[] = []): Promise<void> {
     return this.lock(gid, async () => {
       for (let attempt = 0; attempt < 4; attempt++) {
         await this.syncLocked(gid);
@@ -403,14 +423,16 @@ export class MlsCrypto implements MessageCrypto {
           continue;
         }
         const epoch = Number(rec.state.groupContext.epoch);
-        const body = utf8.encode(JSON.stringify({ v: 1, text, from: this.me.deviceId }));
+        const body = utf8.encode(
+          JSON.stringify(files.length ? { v: 1, text, from: this.me.deviceId, files } : { v: 1, text, from: this.me.deviceId }),
+        );
         const am = await createApplicationMessage(rec.state, body, this.cs);
         // Keep the advanced ratchet even if the post fails, so a key is never reused.
         rec.state = am.newState;
         await this.persist(gid, rec);
         const wire = encodeMlsMessage({ version: "mls10", wireformat: "mls_private_message", privateMessage: am.privateMessage });
         try {
-          const { seq } = await api.send(gid, "application", epoch, toB64(wire));
+          const { seq } = await api.send(gid, "application", epoch, toB64(wire), files.map((f) => f.id));
           const shown: ShownMessage = {
             seq,
             groupId: gid,
@@ -419,6 +441,7 @@ export class MlsCrypto implements MessageCrypto {
             createdAt: Math.floor(Date.now() / 1000),
             state: "ok",
             text,
+            ...(files.length ? { files } : {}),
           };
           rec.messages.set(seq, shown);
           await this.persist(gid, rec, shown);

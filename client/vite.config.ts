@@ -11,7 +11,7 @@ import { defineConfig, type Plugin } from "vite";
 // meta tag because nothing serves headers there, also allows connections to
 // other hosts.
 const APP_CSP =
-  "default-src 'self'; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'none'; form-action 'none'";
+  "default-src 'self'; img-src 'self' blob:; connect-src 'self' http: https: ws: wss:; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 // Vite runs this file in Node; the client's tsconfig has no Node types.
 declare const process: { env: Record<string, string | undefined> };
