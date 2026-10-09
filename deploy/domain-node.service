@@ -1,0 +1,22 @@
+# systemd unit for running a Domain Node on Linux or a Raspberry Pi.
+# Install: copy the binary to /usr/local/bin/domain-node, create the user with
+#   sudo useradd --system --home /var/lib/strange-domain strange-domain
+# then copy this file to /etc/systemd/system/ and run
+#   sudo systemctl enable --now domain-node
+[Unit]
+Description=Strange Domain node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=strange-domain
+ExecStart=/usr/local/bin/domain-node -listen :8743 -data /var/lib/strange-domain
+Restart=on-failure
+StateDirectory=strange-domain
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
