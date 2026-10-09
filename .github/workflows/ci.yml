@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # the release workflow runs these checks first
 
 permissions:
   contents: read
@@ -46,6 +47,26 @@ jobs:
             echo "internal/server/web is out of date: run 'npm run build' in client/ and commit the result"
             exit 1
           fi
+      # The phone app's build of the same client (written to mobile/www).
+      - run: npm run build:app
+
+  desktop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: for f in src/*.js electron-builder.config.js; do node --check "$f"; done
+      - run: npm test
 
   build:
     needs: [test, client]

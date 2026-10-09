@@ -1,0 +1,313 @@
+name: Release
+
+# Builds every download and publishes a GitHub Release.
+#   - Push a tag like v0.1.0 (git tag v0.1.0 && git push origin v0.1.0), or
+#   - Actions -> Release -> Run workflow, and type the version (0.1.0).
+# See docs/INSTALL.md.
+#
+# Optional signing secrets (nothing is signed without them):
+#   Android:  ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+#             ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#   macOS:    MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD, and for notarization
+#             APPLE_API_KEY_BASE64, APPLE_API_KEY_ID, APPLE_API_ISSUER
+#   Windows:  WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, for example 0.1.0 (the tag v0.1.0 is created on the chosen branch)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_TYPE" = "tag" ]; then
+            v="${REF_NAME#v}"
+          else
+            v="${INPUT_VERSION#v}"
+          fi
+          if ! printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Version must look like 1.2.3 or 1.2.3-beta.1 (got '$v')"
+            exit 1
+          fi
+          pre=false
+          case "$v" in *-*) pre=true ;; esac
+          {
+            echo "version=$v"
+            echo "tag=v$v"
+            echo "prerelease=$pre"
+          } >> "$GITHUB_OUTPUT"
+
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  node:
+    needs: [version, checks]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, name: linux-x64 }
+          - { goos: linux,   goarch: arm64, name: linux-arm64-raspberrypi }
+          - { goos: linux,   goarch: arm,   goarm: "7", name: linux-armv7-raspberrypi }
+          - { goos: windows, goarch: amd64, name: windows-x64 }
+          - { goos: darwin,  goarch: amd64, name: macos-intel }
+          - { goos: darwin,  goarch: arm64, name: macos-apple-silicon }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build and archive domain-node
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ needs.version.outputs.version }}
+          NAME: ${{ matrix.name }}
+        run: |
+          dir="domain-node-$VERSION-$NAME"
+          mkdir -p "stage/$dir" out
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/nathankhaag-cell/the-strange-domain-2/internal/server.Version=v$VERSION" \
+            -o "stage/$dir/" ./cmd/domain-node
+          cp README.md docs/INSTALL.md "stage/$dir/"
+          if [ "$GOOS" = "linux" ]; then cp deploy/domain-node.service "stage/$dir/"; fi
+          cd stage
+          if [ "$GOOS" = "windows" ]; then
+            zip -qr "../out/$dir.zip" "$dir"
+          else
+            tar -czf "../out/$dir.tar.gz" "$dir"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  desktop:
+    needs: [version, checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, flag: --win }
+          - { os: macos-latest,   flag: --mac }
+          - { os: ubuntu-latest,  flag: --linux }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # Signing is turned on only when the secrets exist; electron-builder
+      # reads these variables itself (see desktop/electron-builder.config.js).
+      - name: Signing setup (optional)
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          OS: ${{ runner.os }}
+        run: |
+          if [ "$OS" = "macOS" ] && [ -n "$MAC_CSC_LINK" ]; then
+            echo "Signing the macOS app with the MAC_CSC_LINK certificate."
+            { echo "CSC_LINK=$MAC_CSC_LINK"; echo "CSC_KEY_PASSWORD=$MAC_CSC_KEY_PASSWORD"; } >> "$GITHUB_ENV"
+            if [ -n "$APPLE_API_KEY_BASE64" ]; then
+              key="$RUNNER_TEMP/apple-api-key.p8"
+              printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$key"
+              { echo "APPLE_API_KEY=$key"; echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID"; echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"; } >> "$GITHUB_ENV"
+            fi
+          elif [ "$OS" = "Windows" ] && [ -n "$WIN_CSC_LINK" ]; then
+            echo "Signing the Windows installer with the WIN_CSC_LINK certificate."
+            { echo "WIN_CSC_LINK=$WIN_CSC_LINK"; echo "WIN_CSC_KEY_PASSWORD=$WIN_CSC_KEY_PASSWORD"; } >> "$GITHUB_ENV"
+          else
+            echo "No signing secrets: building unsigned."
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+          fi
+      - name: Build installers
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          FLAG: ${{ matrix.flag }}
+        run: npm run dist -- "$FLAG" "-c.extraMetadata.version=$VERSION"
+      - name: Collect installers
+        run: |
+          mkdir -p ../out
+          for f in dist/*.exe dist/*.dmg dist/*.AppImage dist/*.deb; do
+            if [ -e "$f" ]; then cp "$f" ../out/; fi
+          done
+          ls -l ../out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ runner.os }}
+          path: out/*
+          if-no-files-found: error
+
+  android:
+    needs: [version, checks]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            client/package-lock.json
+            mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Build the client for the app
+        working-directory: client
+        run: |
+          npm ci
+          npm run build:app
+      - name: Copy it into the Android project
+        working-directory: mobile
+        run: |
+          npm ci
+          npx cap sync android
+      - name: Keystore (optional)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            ks="$RUNNER_TEMP/release.keystore"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ks"
+            echo "ANDROID_KEYSTORE_FILE=$ks" >> "$GITHUB_ENV"
+            echo "Building a release APK signed with your keystore."
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret: building a debug-signed APK."
+          fi
+      - name: Build APK
+        working-directory: mobile/android
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          VERSION_CODE: ${{ github.run_number }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p ../../out
+          props=("-PappVersionName=$VERSION" "-PappVersionCode=$VERSION_CODE")
+          if [ -n "${ANDROID_KEYSTORE_FILE:-}" ]; then
+            ./gradlew --no-daemon assembleRelease "${props[@]}"
+            cp app/build/outputs/apk/release/app-release.apk "../../out/The-Strange-Domain-$VERSION-android.apk"
+          else
+            ./gradlew --no-daemon assembleDebug "${props[@]}"
+            cp app/build/outputs/apk/debug/app-debug.apk "../../out/The-Strange-Domain-$VERSION-android-debug-signed.apk"
+          fi
+          ls -l ../../out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, node, desktop, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Checksums
+        working-directory: release
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Release notes
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          url="https://github.com/$REPO/releases/download/$TAG"
+          row() { echo "| $1 | [$2]($url/$2) |"; }
+          (
+            echo "## Downloads"
+            echo
+            echo "| You have | Download |"
+            echo "| --- | --- |"
+            cd release
+            for pattern in "*windows*setup.exe|Windows" \
+                           "*macos-arm64.dmg|Mac with Apple silicon (M1 or later)" \
+                           "*macos-x64.dmg|Mac with an Intel processor" \
+                           "*x86_64.AppImage|Linux (64-bit PC)" \
+                           "*amd64.deb|Linux (64-bit PC, Debian or Ubuntu)" \
+                           "*arm64.AppImage|Linux (64-bit ARM, such as a Raspberry Pi 4 or 5 with a desktop)" \
+                           "*arm64.deb|Linux (64-bit ARM, Debian or Raspberry Pi OS)" \
+                           "*android*.apk|Android phone or tablet"; do
+              for f in ${pattern%%|*}; do
+                if [ -e "$f" ]; then row "${pattern#*|}" "$f"; fi
+              done
+            done
+            echo
+            echo "The **domain-node** archives are the server (the Domain Node) for a PC, Mac or Raspberry Pi."
+            echo
+            echo "If your computer or phone warns you the first time you open an app, [INSTALL.md](https://github.com/$REPO/blob/$TAG/docs/INSTALL.md) says what to click."
+            if ls ./*android-debug-signed.apk > /dev/null 2>&1; then
+              echo
+              echo "The Android app in this release is debug-signed. Each debug-signed release has a different signature, so to install a newer one you must uninstall the old one first. That deletes its keys and messages: afterwards, link the phone again from another device, or use your recovery code."
+            fi
+            echo
+            echo "SHA256SUMS lists the checksum of every file."
+          ) > notes.md
+          cat notes.md
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* \
+              --target "$GITHUB_SHA" \
+              --title "The Strange Domain $TAG" \
+              --notes-file notes.md \
+              --generate-notes \
+              "${flags[@]}"
+          fi

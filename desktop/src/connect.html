@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Strange Domain</title>
+<link rel="stylesheet" href="connect.css">
+</head>
+<body>
+<main class="card">
+  <div class="head">
+    <div class="badge" aria-hidden="true">74</div>
+    <h1>The Strange Domain</h1>
+  </div>
+
+  <form id="form" novalidate>
+    <h2>Connect to a node</h2>
+    <p class="muted">Enter the address of the Domain Node you use, for example <code>192.168.1.20:8743</code> or <code>https://node.example.com</code>.</p>
+    <label for="address">Node address</label>
+    <input id="address" name="address" type="text" autocomplete="off" spellcheck="false" required>
+    <div id="error" class="error" role="alert" hidden></div>
+    <button id="submit" type="submit">Connect</button>
+  </form>
+
+  <section id="trust" hidden>
+    <h2>Check the node's certificate</h2>
+    <p>This node uses a certificate this computer does not trust, usually because the node made it itself. Make sure this fingerprint matches the one in the node's log before you continue.</p>
+    <p class="fp"><code id="fingerprint"></code></p>
+    <div class="row">
+      <button id="trust-yes" type="button">Trust and connect</button>
+      <button id="trust-no" type="button" class="secondary">Cancel</button>
+    </div>
+  </section>
+
+  <p class="muted small">You can change the node later from File, Change node.</p>
+</main>
+<script src="connect.js"></script>
+</body>
+</html>

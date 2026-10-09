@@ -2,7 +2,10 @@
 // stores. Values are structured-cloned, so CryptoKey objects (including
 // non-extractable ones) and Uint8Arrays are stored as they are.
 
-const DB_NAME = "strange-domain";
+import { storageSuffix } from "./node";
+
+// One database per node in the phone app (see node.ts).
+const DB_NAME = "strange-domain" + storageSuffix;
 const DB_VERSION = 1;
 export const STORES = ["device", "keypackages", "groups", "plaintext", "prefs"] as const;
 export type StoreName = (typeof STORES)[number];

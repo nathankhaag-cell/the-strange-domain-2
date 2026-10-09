@@ -1,0 +1,12 @@
+{
+  "appId": "io.github.nathankhaagcell.strangedomain",
+  "appName": "The Strange Domain",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "hostname": "localhost"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

@@ -16,6 +16,7 @@ import {
 } from "../app";
 import type { ShownMessage } from "../crypto/types";
 import { Badge, REDACTED, TAGLINE, errText, fmtTime, initials } from "./common";
+import { nodeHost } from "../node";
 import { Lock, RoleIcon, Speaker } from "./icons";
 import { actorFor, canActOn, has, roleBadge } from "./perms";
 import {
@@ -58,7 +59,7 @@ export function Main() {
           <Lock size={16} />
           END-TO-END ENCRYPTED
         </div>
-        <div class={app.online ? "node-status" : "node-status offline"} title={`Node: ${location.host}`}>
+        <div class={app.online ? "node-status" : "node-status offline"} title={`Node: ${nodeHost()}`}>
           NODE {app.online ? "ONLINE" : "OFFLINE"}
         </div>
         <button type="button" class="btn-small" aria-pressed={!app.effects} onClick={() => setEffects(!app.effects)}>

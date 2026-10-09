@@ -3,6 +3,7 @@ import type { JSX } from "preact";
 import { enlist, forgetDevice, linkDevice, reconnect, recoverAccount, useApp } from "../app";
 import { Lock } from "./icons";
 import { Badge, Field, errText, TAGLINE } from "./common";
+import { BUNDLED, changeNode, nodeHost } from "../node";
 
 type Tab = "enlist" | "reconnect" | "link" | "recover";
 
@@ -13,23 +14,22 @@ export function Auth() {
   return (
     <div class="auth">
       <section class="auth-hero" aria-label="The Strange Domain">
-        <div class="auth-hero-mark">
-          <Badge size="lg" />
-          <h1 class="auth-title">
-            THE
-            <br />
-            STRANGE
-            <br />
-            DOMAIN
-            <span class="cursor cursor-lg" aria-hidden="true" />
-          </h1>
-        </div>
+        <HeroMark />
         <div class="auth-hero-foot">
           <p class="tagline">{TAGLINE}</p>
           <dl class="stat-grid">
             <div>
               <dt>NODE</dt>
-              <dd>{location.host}</dd>
+              <dd>
+                {nodeHost()}
+                {BUNDLED && (
+                  <div>
+                    <button type="button" class="btn-link" onClick={changeNode}>
+                      Change node
+                    </button>
+                  </div>
+                )}
+              </dd>
             </div>
             <div>
               <dt>ENCRYPTION</dt>
@@ -65,6 +65,13 @@ export function Auth() {
               </button>
             ))}
           </div>
+          {!window.isSecureContext && (
+            <div class="error" role="alert">
+              This browser has turned off the encryption features this client needs, because the page was not opened
+              over https:// or on localhost. Start the node with -tls-self-signed and open it at its https:// address,
+              or use the desktop or Android app.
+            </div>
+          )}
           {app.notice && <div class="note">{app.notice}</div>}
           {tab === "enlist" && <EnlistForm hasIdentity={!!app.identity} />}
           {tab === "reconnect" && <ReconnectForm />}
@@ -76,7 +83,23 @@ export function Auth() {
   );
 }
 
-function useSubmit(fn: () => Promise<void>) {
+export function HeroMark() {
+  return (
+    <div class="auth-hero-mark">
+      <Badge size="lg" />
+      <h1 class="auth-title">
+        THE
+        <br />
+        STRANGE
+        <br />
+        DOMAIN
+        <span class="cursor cursor-lg" aria-hidden="true" />
+      </h1>
+    </div>
+  );
+}
+
+export function useSubmit(fn: () => Promise<void>) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const onSubmit = async (e: JSX.TargetedEvent<HTMLFormElement>) => {
@@ -230,6 +253,8 @@ function defaultDeviceName(): string {
           : /Linux/.test(ua)
             ? "Linux"
             : "";
+  if (BUNDLED) return os ? `App on ${os}` : "App";
+  if (/Electron\//.test(ua)) return os ? `Desktop app on ${os}` : "Desktop app";
   const browser = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
   return [browser, os].filter(Boolean).join(" on ");
 }

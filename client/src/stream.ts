@@ -3,6 +3,7 @@
 // belong in URLs. Events only say what changed; we fetch the content.
 
 import { getToken } from "./api";
+import { streamUrl } from "./node";
 
 export interface StreamEvent {
   type: string;
@@ -23,8 +24,7 @@ export class Stream {
 
   connect() {
     if (this.closed) return;
-    const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/v1/stream`;
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(streamUrl());
     this.ws = ws;
     ws.onopen = () => ws.send(JSON.stringify({ token: getToken() }));
     ws.onmessage = (m) => {

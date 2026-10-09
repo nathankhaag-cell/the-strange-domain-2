@@ -18,7 +18,9 @@ Phase 0, foundations. What exists today:
 
 Default roles in every new domain, highest first: **Abbot** (owner), **Bishop** (senior moderator), **Warden** (moderator), **Brother / Sister** (member, given to people who join by Summons) and **Postulant** (new or unverified). Owners can rename them.
 
-Not built yet: voice, history transfer between devices, the Codex (audit log) view, and desktop and phone apps.
+Desktop apps (Windows, macOS, Linux) and an Android app are thin shells around the same client: they ask for the node's address on first start. Releases with every download are built by GitHub Actions; see [docs/INSTALL.md](docs/INSTALL.md).
+
+Not built yet: voice, history transfer between devices, the Codex (audit log) view, and an iOS app.
 
 ## Run it
 
@@ -27,6 +29,10 @@ go run ./cmd/domain-node -listen :8743
 ```
 
 Then open http://localhost:8743. Data goes to your user config folder (`%AppData%\strange-domain` on Windows, `~/Library/Application Support/strange-domain` on macOS, `~/.config/strange-domain` on Linux) unless you pass `-data <dir>`.
+
+**Installing and releases:** [docs/INSTALL.md](docs/INSTALL.md) covers downloading the apps, running the node on a Raspberry Pi, and cutting a release (push a `v*` tag, or Actions > Release > Run workflow).
+
+**HTTPS.** Browsers only give the client WebCrypto on secure pages, so a browser on another machine needs HTTPS. `-tls-self-signed` makes a certificate once, keeps it in `<data>/tls` and logs its SHA-256 fingerprint; `-tls-cert`/`-tls-key` use your own. With `-tls-listen :8744` the node serves HTTPS there and keeps plain HTTP on `-listen` (the desktop and Android apps work over plain HTTP).
 
 ## Web client
 
@@ -48,6 +54,13 @@ How the client handles keys and encryption:
 - A recovery code (20 characters) is turned into a recovery key on the device (PBKDF2-SHA256, salted with the callsign); only the public half goes to the node.
 - Every Chapel and Conclave is an MLS group (suite `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`). Each device publishes KeyPackages; the first device to commit at epoch 0 creates the group; any member's device adds devices that belong in the group (`GET /api/v1/groups/{gid}/devices`) and removes people who left or devices that were revoked. A commit that loses the race gets 409 and is retried after applying the winner.
 - MLS keys are single use, so decrypted messages and group state are kept in IndexedDB on each device. A device cannot read messages sent before it joined a group.
+
+## Apps
+
+- `desktop/`: Electron. It loads the client from the node the person picks (so the client always matches the node), treats that one http:// origin as secure so WebCrypto works, and trusts a self-signed node only by the fingerprint the person confirmed. `npm ci && npm start` to run it, `npm run dist` to build installers (electron-builder).
+- `mobile/`: Capacitor (Android). It bundles the client, built with `npm run build:app` in `client/`, and runs it at http://localhost, which counts as secure; the client then calls the node cross-origin, which the node allows for the app origins only. `npm ci && npm run build:web && npx cap sync android`, then build `mobile/android` with Gradle or Android Studio.
+
+`.github/workflows/release.yml` builds all of these, plus the node for every platform, on every `v*` tag.
 
 ## Build for every platform
 
@@ -72,8 +85,12 @@ internal/domains    domains, roles, invites, moderation, channels
 internal/auth       accounts, device keys, sign-in and sessions
 internal/relay      MLS delivery service, Conclaves and live push
 internal/server     HTTP API and the embedded web client (built output in internal/server/web)
+internal/tlsutil    HTTPS: self-signed certificate and fingerprints
 client/             web client sources (TypeScript, Preact, Vite)
+desktop/            desktop app (Electron)
+mobile/             Android app (Capacitor)
 deploy/             service files
+docs/               INSTALL.md
 ```
 
 ## Test
@@ -81,4 +98,5 @@ deploy/             service files
 ```sh
 go test ./...
 cd client && npm run typecheck
+cd desktop && npm test
 ```

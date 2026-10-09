@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
@@ -51,7 +52,53 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+	if allowAppOrigin(w, r) {
+		return // preflight answered
+	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// appOrigins are where the phone app's bundled client runs. Capacitor serves
+// it from http://localhost on Android (the app's own origin, which browsers
+// count as secure, so it can call a node on the LAN over plain http without
+// mixed-content blocking); https://localhost is Capacitor's other Android
+// scheme and capacitor://localhost its iOS one. Only these origins may read
+// API responses cross-origin. That grants nothing a page could not already
+// do: the API authenticates with a bearer token the app keeps to itself,
+// never with cookies, so a request from any other page carries no one's
+// session. Browsers and the desktop app load the client from the node itself
+// and need no CORS.
+var appOrigins = map[string]bool{
+	"http://localhost":      true,
+	"https://localhost":     true,
+	"capacitor://localhost": true,
+}
+
+// allowAppOrigin adds CORS headers for the app origins on /api/ requests. It
+// reports whether it answered the request (a preflight).
+func allowAppOrigin(w http.ResponseWriter, r *http.Request) bool {
+	if !strings.HasPrefix(r.URL.Path, "/api/") {
+		return false
+	}
+	h := w.Header()
+	h.Add("Vary", "Origin")
+	origin := r.Header.Get("Origin")
+	if !appOrigins[origin] {
+		return false
+	}
+	h.Set("Access-Control-Allow-Origin", origin)
+	if r.Method != http.MethodOptions || r.Header.Get("Access-Control-Request-Method") == "" {
+		return false
+	}
+	h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
+	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+	h.Set("Access-Control-Max-Age", "600")
+	// The app (on localhost) talks to a node on the LAN (Private Network Access).
+	if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+		h.Set("Access-Control-Allow-Private-Network", "true")
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return true
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {

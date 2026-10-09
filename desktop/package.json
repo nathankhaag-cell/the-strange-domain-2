@@ -1,0 +1,25 @@
+{
+  "name": "the-strange-domain",
+  "productName": "The Strange Domain",
+  "version": "0.1.0",
+  "description": "Desktop app for The Strange Domain: end-to-end encrypted voice and data for family and friends.",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": "The Strange Domain",
+  "homepage": "https://github.com/nathankhaag-cell/the-strange-domain-2",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder --config electron-builder.config.js --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nathankhaag-cell/the-strange-domain-2.git"
+  },
+  "desktopName": "the-strange-domain.desktop"
+}

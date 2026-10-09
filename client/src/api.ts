@@ -1,5 +1,7 @@
 // Typed client for the Domain Node's JSON API (internal/server/*.go).
 
+import { apiUrl } from "./node";
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -23,7 +25,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (token) headers["Authorization"] = "Bearer " + token;
-  const res = await fetch("/api/v1" + path, {
+  const res = await fetch(apiUrl(path), {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),

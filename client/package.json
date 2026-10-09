@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "build": "vite build"
+    "build": "vite build",
+    "build:app": "vite build --mode app"
   },
   "dependencies": {
     "@fontsource/vt323": "5.3.0",
