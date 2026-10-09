@@ -10,6 +10,7 @@ import (
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
 )
 
@@ -27,15 +28,18 @@ type Server struct {
 	st      *store.Store
 	dom     *domains.Service
 	auth    *auth.Service
+	relay   *relay.Service
+	hub     *relay.Hub
 	started time.Time
 	mux     *http.ServeMux
 }
 
-func New(st *store.Store, dom *domains.Service, au *auth.Service) *Server {
-	s := &Server{st: st, dom: dom, auth: au, started: time.Now(), mux: http.NewServeMux()}
+func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Service, hub *relay.Hub) *Server {
+	s := &Server{st: st, dom: dom, auth: au, relay: rl, hub: hub, started: time.Now(), mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /healthz", s.healthz)
 	s.mux.HandleFunc("GET /api/v1/info", s.info)
 	s.routes()
+	s.relayRoutes()
 	web, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /", http.FileServer(http.FS(web)))
 	return s

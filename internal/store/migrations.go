@@ -107,4 +107,60 @@ CREATE TABLE sessions (
 	expires_at INTEGER NOT NULL
 );
 `,
+	`
+-- MLS delivery service. The node stores and orders opaque MLS messages; it
+-- never holds keys and cannot read content.
+
+-- Prepublished MLS KeyPackages, one consumed each time a device is added to a group.
+CREATE TABLE key_packages (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+	data       BLOB NOT NULL,
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX key_packages_device ON key_packages(device_id, id);
+
+-- Conclaves are DMs outside any domain: a Confession has two members, a
+-- group Conclave more.
+CREATE TABLE conclaves (
+	id         TEXT PRIMARY KEY,
+	created_by TEXT NOT NULL REFERENCES users(id),
+	created_at INTEGER NOT NULL
+);
+CREATE TABLE conclave_members (
+	conclave_id TEXT NOT NULL REFERENCES conclaves(id) ON DELETE CASCADE,
+	user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	PRIMARY KEY (conclave_id, user_id)
+);
+
+-- One MLS group per channel or conclave; the group id is that row's id.
+-- The node orders commits so every member agrees on the epoch.
+CREATE TABLE mls_groups (
+	id    TEXT PRIMARY KEY,
+	epoch INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE mls_messages (
+	seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+	group_id      TEXT NOT NULL REFERENCES mls_groups(id) ON DELETE CASCADE,
+	sender_user   TEXT NOT NULL,
+	sender_device TEXT NOT NULL,
+	kind          TEXT NOT NULL CHECK (kind IN ('application', 'proposal', 'commit')),
+	epoch         INTEGER NOT NULL,
+	data          BLOB,
+	deleted       INTEGER NOT NULL DEFAULT 0,
+	created_at    INTEGER NOT NULL
+);
+CREATE INDEX mls_messages_group ON mls_messages(group_id, seq);
+
+-- Welcome messages are addressed to one device and deleted once fetched.
+CREATE TABLE mls_welcomes (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	device_id  TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+	group_id   TEXT NOT NULL REFERENCES mls_groups(id) ON DELETE CASCADE,
+	data       BLOB NOT NULL,
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX mls_welcomes_device ON mls_welcomes(device_id, id);
+`,
 }
