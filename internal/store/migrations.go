@@ -198,4 +198,30 @@ CREATE TABLE device_transfers (
 );
 CREATE INDEX device_transfers_to ON device_transfers(to_device, id);
 `,
+	`
+-- Attachments: files encrypted on the device with a fresh key that travels
+-- only inside the MLS message. The node keeps the ciphertext on disk under
+-- <data>/blobs and only this row here. A blob is uploaded for one group and
+-- attached to one message (seq) when that message is sent; until then only
+-- its uploader can fetch it.
+CREATE TABLE blobs (
+	id         TEXT PRIMARY KEY,
+	owner_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	group_id   TEXT NOT NULL,
+	size       INTEGER NOT NULL,
+	seq        INTEGER,
+	created_at INTEGER NOT NULL
+);
+CREATE INDEX blobs_owner ON blobs(owner_id);
+CREATE INDEX blobs_message ON blobs(group_id, seq);
+
+-- Profile pictures. Not end-to-end encrypted: like callsigns, the node can
+-- see them. Small (a 256 px square), so they live in the database.
+CREATE TABLE avatars (
+	user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+	mime    TEXT NOT NULL,
+	data    BLOB NOT NULL,
+	version INTEGER NOT NULL
+);
+`,
 }

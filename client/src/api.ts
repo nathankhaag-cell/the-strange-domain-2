@@ -57,6 +57,8 @@ export interface Me {
   device_id: string;
   callsign: string;
   is_node_admin: boolean;
+  /** Profile picture version; absent when there is none. */
+  avatar?: number;
 }
 export interface Domain {
   id: string;
@@ -74,6 +76,7 @@ export interface Member {
   callsign: string;
   role_id: string;
   muted: boolean;
+  avatar?: number;
 }
 export interface Channel {
   id: string;
@@ -95,7 +98,7 @@ export interface Conclave {
   id: string;
   created_by: string;
   created_at: number;
-  members: { user_id: string; callsign: string }[];
+  members: { user_id: string; callsign: string; avatar?: number }[];
 }
 export interface WireMessage {
   seq: number;
@@ -116,6 +119,13 @@ export interface WireWelcome {
 export interface GroupDevice {
   user_id: string;
   device_id: string;
+}
+export interface Limits {
+  max_upload_bytes: number;
+  quota_bytes: number;
+  used_bytes: number;
+  max_files: number;
+  max_avatar_bytes: number;
 }
 export interface ClaimedKeyPackage {
   device_id: string;
@@ -203,10 +213,52 @@ export const api = {
   epoch: (gid: string) => call<{ epoch: number }>("GET", `/groups/${gid}/epoch`),
   messages: (gid: string, after: number, limit = 200) =>
     call<WireMessage[]>("GET", `/groups/${gid}/messages?after=${after}&limit=${limit}`),
-  send: (gid: string, kind: "application" | "commit", epoch: number, data: string) =>
-    call<{ seq: number }>("POST", `/groups/${gid}/messages`, { kind, epoch, data }),
+  send: (gid: string, kind: "application" | "commit", epoch: number, data: string, blobs?: string[]) =>
+    call<{ seq: number }>("POST", `/groups/${gid}/messages`, blobs?.length ? { kind, epoch, data, blobs } : { kind, epoch, data }),
   deleteMessage: (gid: string, seq: number) => call<void>("DELETE", `/groups/${gid}/messages/${seq}`),
   sendWelcome: (gid: string, device_id: string, data: string) =>
     call<void>("POST", `/groups/${gid}/welcomes`, { device_id, data }),
   takeWelcomes: () => call<WireWelcome[]>("POST", "/welcomes/take"),
+
+  limits: () => call<Limits>("GET", "/limits"),
+  /** Uploads an encrypted attachment (ciphertext only) for a group. */
+  uploadBlob: (gid: string, ciphertext: Uint8Array) =>
+    callRaw<{ id: string; size: number }>("POST", `/groups/${gid}/blobs`, ciphertext as Uint8Array<ArrayBuffer>, "application/octet-stream"),
+  fetchBlob: (id: string) => fetchBytes(`/blobs/${encodeURIComponent(id)}`),
+  setAvatar: (image: Blob) => callRaw<{ avatar: number }>("PUT", "/account/avatar", image, image.type),
+  deleteAvatar: () => call<void>("DELETE", "/account/avatar"),
+  fetchAvatar: (uid: string, version: number) => fetchBlobBody(`/users/${encodeURIComponent(uid)}/avatar?v=${version}`),
 };
+
+async function failed(res: Response): Promise<never> {
+  let msg = res.statusText;
+  try {
+    msg = (await res.json()).error ?? msg;
+  } catch {
+    /* not JSON */
+  }
+  if (res.status === 401 && token && onUnauthorized) onUnauthorized();
+  throw new ApiError(res.status, msg);
+}
+
+function authHeaders(): Record<string, string> {
+  return token ? { Authorization: "Bearer " + token } : {};
+}
+
+async function callRaw<T>(method: string, path: string, body: BodyInit, type: string): Promise<T> {
+  const res = await fetch(apiUrl(path), { method, headers: { ...authHeaders(), "Content-Type": type }, body });
+  if (!res.ok) return failed(res);
+  return (await res.json()) as T;
+}
+
+async function fetchBytes(path: string): Promise<Uint8Array> {
+  const res = await fetch(apiUrl(path), { headers: authHeaders() });
+  if (!res.ok) return failed(res);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+async function fetchBlobBody(path: string): Promise<Blob> {
+  const res = await fetch(apiUrl(path), { headers: authHeaders() });
+  if (!res.ok) return failed(res);
+  return await res.blob();
+}

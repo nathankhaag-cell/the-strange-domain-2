@@ -93,6 +93,22 @@ func (s *Server) listConclaves(w http.ResponseWriter, r *http.Request, a auth.Ac
 		writeErr(w, err)
 		return
 	}
+	var ids []string
+	for _, c := range cs {
+		for _, m := range c.Members {
+			ids = append(ids, m.UserID)
+		}
+	}
+	avatars, err := s.blobs.AvatarVersions(r.Context(), ids)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	for i := range cs {
+		for j := range cs[i].Members {
+			cs[i].Members[j].Avatar = avatars[cs[i].Members[j].UserID]
+		}
+	}
 	writeJSON(w, cs)
 }
 
@@ -149,14 +165,34 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, a auth.Acco
 		Kind  string `json:"kind"`
 		Epoch int64  `json:"epoch"`
 		Data  []byte `json:"data"`
+		// Blobs lists attachments uploaded for this message; they become
+		// readable by the group and are deleted with the message.
+		Blobs []string `json:"blobs,omitempty"`
 	}
 	if !readJSONLimit(w, r, &req, relay.MaxMessageSize*2) {
 		return
 	}
-	m, err := s.relay.Send(r.Context(), r.PathValue("gid"), a.UserID, a.DeviceID, req.Kind, req.Epoch, req.Data)
+	gid := r.PathValue("gid")
+	if len(req.Blobs) > 0 {
+		if req.Kind != relay.KindApplication {
+			writeErr(w, domains.ErrInvalidInput)
+			return
+		}
+		if err := s.blobs.CheckPending(r.Context(), a.UserID, gid, req.Blobs); err != nil {
+			writeErr(w, err)
+			return
+		}
+	}
+	m, err := s.relay.Send(r.Context(), gid, a.UserID, a.DeviceID, req.Kind, req.Epoch, req.Data)
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	if len(req.Blobs) > 0 {
+		if err := s.blobs.Attach(r.Context(), a.UserID, gid, m.Seq, req.Blobs); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]int64{"seq": m.Seq})
@@ -168,7 +204,14 @@ func (s *Server) deleteMessage(w http.ResponseWriter, r *http.Request, a auth.Ac
 		writeErr(w, domains.ErrInvalidInput)
 		return
 	}
-	done(w, s.relay.Delete(r.Context(), r.PathValue("gid"), seq, a.UserID))
+	if err := s.relay.Delete(r.Context(), r.PathValue("gid"), seq, a.UserID); err != nil {
+		writeErr(w, err)
+		return
+	}
+	// The message is gone; so are its attachments. A failure here leaves
+	// them for the sweep, which removes blobs of deleted messages.
+	_ = s.blobs.DeleteForMessage(r.Context(), r.PathValue("gid"), seq)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) sendWelcome(w http.ResponseWriter, r *http.Request, a auth.Account) {

@@ -13,6 +13,7 @@ import {
   type Domain,
   type DomainDetail,
   type Info,
+  type Limits,
   type Me,
 } from "./api";
 import { fromB64, toB64 } from "./b64";
@@ -33,6 +34,20 @@ import { MlsCrypto } from "./crypto/mls";
 import type { MessageCrypto } from "./crypto/types";
 import { Stream, type StreamEvent } from "./stream";
 import { hasNode, storageSuffix } from "./node";
+import { encryptAndUpload, fmtSize, forgetFiles, type FileRef } from "./files";
+import type { ShownMessage } from "./crypto/types";
+import {
+  askedBefore,
+  loadPrefs,
+  markAsked,
+  onNotificationOpen,
+  permission,
+  playTone,
+  requestPermission,
+  savePrefs,
+  showNotification,
+  type NotifyPrefs,
+} from "./notify";
 
 export type Honorific = "Brother" | "Sister";
 
@@ -53,6 +68,14 @@ export interface AppState {
   rev: number;
   notice?: string;
   showRecoveryHint: boolean;
+  /** Unread messages per group (Chapel or Conclave). */
+  unread: Record<string, number>;
+  /** Groups whose new messages make no sound or notification. */
+  mutedChats: string[];
+  notifyPrefs: NotifyPrefs;
+  /** Show the one-time offer to turn on notifications. */
+  askNotify: boolean;
+  limits?: Limits;
 }
 
 // The session belongs to one node (see node.ts).
@@ -60,6 +83,8 @@ const TOKEN_KEY = "sd.token" + storageSuffix;
 const EFFECTS_KEY = "sd.effects";
 const HONORIFIC_KEY = "sd.honorific";
 const RECOVERY_SET_KEY = "sd.recoverySet" + storageSuffix;
+const UNREAD_KEY = "sd.unread" + storageSuffix;
+const MUTED_KEY = "sd.mutedChats" + storageSuffix;
 
 function lsGet(k: string): string | null {
   try {
@@ -76,6 +101,14 @@ function lsSet(k: string, v: string | null) {
     /* storage blocked */
   }
 }
+function lsJSON<T>(k: string, fallback: T): T {
+  try {
+    const v = lsGet(k);
+    return v ? (JSON.parse(v) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 const prefersReduced = typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -90,6 +123,10 @@ let state: AppState = {
   honorific: (lsGet(HONORIFIC_KEY) as Honorific | null) ?? undefined,
   rev: 0,
   showRecoveryHint: false,
+  unread: lsJSON<Record<string, number>>(UNREAD_KEY, {}),
+  mutedChats: lsJSON<string[]>(MUTED_KEY, []),
+  notifyPrefs: loadPrefs(),
+  askNotify: false,
 };
 const subs = new Set<() => void>();
 
@@ -139,6 +176,119 @@ export function dismissRecoveryHint() {
 
 export function notify(msg: string | undefined) {
   set({ notice: msg });
+}
+
+// ---- notifications and unread counts ----
+
+export function setNotifyPrefs(p: NotifyPrefs) {
+  savePrefs(p);
+  set({ notifyPrefs: p });
+}
+
+/** Asks for permission and turns OS notifications on. Returns false if refused. */
+export async function enableNotifications(): Promise<boolean> {
+  markAsked();
+  const p = await requestPermission();
+  const on = p === "granted";
+  setNotifyPrefs({ ...state.notifyPrefs, notify: on });
+  set({ askNotify: false });
+  return on;
+}
+
+export function dismissNotifyAsk() {
+  markAsked();
+  set({ askNotify: false });
+}
+
+export function toggleMuteChat(gid: string) {
+  const muted = state.mutedChats.includes(gid)
+    ? state.mutedChats.filter((g) => g !== gid)
+    : [...state.mutedChats, gid];
+  lsSet(MUTED_KEY, JSON.stringify(muted));
+  set({ mutedChats: muted });
+}
+
+function setUnread(unread: Record<string, number>) {
+  lsSet(UNREAD_KEY, JSON.stringify(unread));
+  set({ unread });
+  const total = Object.values(unread).reduce((a, b) => a + b, 0);
+  if (typeof document !== "undefined") document.title = (total > 0 ? `(${total}) ` : "") + "The Strange Domain";
+}
+
+function clearUnread(gid: string | undefined) {
+  if (gid && state.unread[gid]) {
+    const { [gid]: _, ...rest } = state.unread;
+    setUnread(rest);
+  }
+}
+
+/** A chat's name as the sidebar shows it, for notifications. */
+export function chatLabel(gid: string): string {
+  for (const d of Object.values(state.details)) {
+    const ch = d.channels.find((c) => c.id === gid);
+    if (ch) return "#" + ch.name;
+  }
+  const c = state.conclaves.find((x) => x.id === gid);
+  if (c) {
+    const others = c.members.filter((m) => m.user_id !== state.me?.user_id).map((m) => m.callsign);
+    return others.slice(0, 3).join(", ") || "a Conclave";
+  }
+  return "a chat";
+}
+
+function callsignOf(uid: string): string {
+  for (const d of Object.values(state.details)) {
+    const m = d.members.find((x) => x.user_id === uid);
+    if (m) return m.callsign;
+  }
+  for (const c of state.conclaves) {
+    const m = c.members.find((x) => x.user_id === uid);
+    if (m) return m.callsign;
+  }
+  return "Someone";
+}
+
+const pendingAlerts = new Map<string, ShownMessage>();
+let alertTimer: number | undefined;
+
+function inView(gid: string): boolean {
+  return state.phase === "main" && state.selGroup === gid && typeof document !== "undefined" && !document.hidden;
+}
+
+function onIncoming(m: ShownMessage) {
+  if (m.senderUser === state.me?.user_id) return; // from another of my devices
+  if (inView(m.groupId)) return;
+  setUnread({ ...state.unread, [m.groupId]: (state.unread[m.groupId] ?? 0) + 1 });
+  if (state.mutedChats.includes(m.groupId)) return;
+  // Messages often arrive in bursts (catching up after being offline): one
+  // sound per burst and one notification per chat.
+  pendingAlerts.set(m.groupId, m);
+  if (alertTimer === undefined) alertTimer = window.setTimeout(flushAlerts, 400);
+}
+
+function flushAlerts() {
+  alertTimer = undefined;
+  const msgs = Array.from(pendingAlerts.values());
+  pendingAlerts.clear();
+  if (msgs.length === 0) return;
+  const prefs = state.notifyPrefs;
+  if (prefs.sound) playTone();
+  if (!prefs.notify) return;
+  for (const m of msgs) {
+    const title = `New message in ${chatLabel(m.groupId)}`;
+    let body = "";
+    if (prefs.preview) {
+      const text = m.text?.trim() || (m.files?.length ? "Sent a file" : "");
+      body = `${callsignOf(m.senderUser)}: ${text}`.slice(0, 200);
+    }
+    void showNotification(m.groupId, title, body);
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) clearUnread(state.selGroup);
+  });
 }
 
 // ---- boot and sign-in ----
@@ -267,11 +417,16 @@ async function startMain() {
   set({ me, notice: undefined });
   const c = new MlsCrypto({ userId: me.user_id, deviceId: me.device_id });
   c.onChange(() => set({ rev: state.rev + 1 }));
+  c.onIncoming(onIncoming);
+  onNotificationOpen((gid) => void openGroup(gid));
   await c.start();
   engine = c;
   await Promise.all([refreshDomains(), refreshConclaves(), refreshDevices()]);
   if (lsGet(RECOVERY_SET_KEY) !== "1") set({ showRecoveryHint: true });
   set({ phase: "main" });
+  setUnread(state.unread);
+  void api.limits().then((limits) => set({ limits }), () => undefined);
+  if (!askedBefore() && (await permission()) === "default") set({ askNotify: true });
   if (!state.selDomain && state.domains[0]) await selectDomain(state.domains[0].id);
   stream = new Stream(onEvent, (online) => {
     set({ online });
@@ -364,7 +519,14 @@ async function onEvent(ev: StreamEvent) {
         if (ev.group_id) await c.sync(ev.group_id);
         break;
       case "deleted":
-        if (ev.group_id && ev.seq) await c.markDeleted(ev.group_id, ev.seq);
+        if (ev.group_id && ev.seq) {
+          forgetFiles(c.messages(ev.group_id).find((m) => m.seq === ev.seq)?.files);
+          await c.markDeleted(ev.group_id, ev.seq);
+        }
+        break;
+      case "avatar":
+        if (ev.group_id === state.me?.user_id) set({ me: await api.me() });
+        await Promise.all([refreshDomains(), refreshConclaves()]);
         break;
       case "welcome":
         await c.takeWelcomes();
@@ -409,6 +571,7 @@ export async function selectDomain(id: string) {
 
 export async function openGroup(gid: string) {
   set({ selGroup: gid });
+  clearUnread(gid);
   const c = engine;
   if (!c) return;
   try {
@@ -445,14 +608,38 @@ export async function createConclave(memberIds: string[]) {
   await openGroup(id);
 }
 
-export async function sendMessage(gid: string, text: string) {
+export async function sendMessage(gid: string, text: string, files: File[] = []) {
   if (!engine) throw new Error("not signed in");
-  await engine.send(gid, text);
+  const limits = state.limits ?? (await api.limits());
+  if (files.length > limits.max_files) throw new Error(`You can send at most ${limits.max_files} files at once.`);
+  for (const f of files) {
+    if (f.size > limits.max_upload_bytes) {
+      throw new Error(`${f.name} is too large. The limit on this node is ${fmtSize(limits.max_upload_bytes)}.`);
+    }
+    if (f.size === 0) throw new Error(`${f.name} is empty.`);
+  }
+  const refs: FileRef[] = [];
+  for (const f of files) refs.push(await encryptAndUpload(gid, f));
+  await engine.send(gid, text, refs);
+  if (files.length) void api.limits().then((l) => set({ limits: l }), () => undefined);
 }
 
 export async function deleteMessage(gid: string, seq: number) {
   await api.deleteMessage(gid, seq);
+  forgetFiles(engine?.messages(gid).find((m) => m.seq === seq)?.files);
   await engine?.markDeleted(gid, seq);
+}
+
+// ---- profile picture ----
+
+export async function setAvatar(image: Blob) {
+  const { avatar } = await api.setAvatar(image);
+  if (state.me) set({ me: { ...state.me, avatar } });
+}
+
+export async function removeAvatar() {
+  await api.deleteAvatar();
+  if (state.me) set({ me: { ...state.me, avatar: undefined } });
 }
 
 export async function moderate(domainId: string, action: () => Promise<void>) {

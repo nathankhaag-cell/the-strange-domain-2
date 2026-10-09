@@ -71,6 +71,29 @@ export const Candle = () => (
   </Svg>
 );
 
+// Added for the phone layout and attachments (pending approval).
+
+export const MenuIcon = () => (
+  <Svg size={22}>
+    <path d="M3 6h18" />
+    <path d="M3 12h18" />
+    <path d="M3 18h18" />
+  </Svg>
+);
+
+export const Paperclip = () => (
+  <Svg size={22}>
+    <path d="M20 11l-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7" />
+  </Svg>
+);
+
+export const FileIcon = () => (
+  <Svg size={22}>
+    <path d="M6 2h8l5 5v15H6z" />
+    <path d="M14 2v5h5" />
+  </Svg>
+);
+
 export function RoleIcon({ rank }: { rank: number }) {
   if (rank >= 1000) return <Crosier />;
   if (rank >= 500) return <Mitre />;

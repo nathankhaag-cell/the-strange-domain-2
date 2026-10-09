@@ -468,6 +468,23 @@ func (s *Service) access(ctx context.Context, groupID, userID string, send bool)
 	return s.userList(ctx, `SELECT user_id FROM conclave_members WHERE conclave_id = ?`, groupID)
 }
 
+// CanRead reports whether userID may read groupID (nil if so).
+func (s *Service) CanRead(ctx context.Context, groupID, userID string) error {
+	_, err := s.access(ctx, groupID, userID, false)
+	return err
+}
+
+// CanSend reports whether userID may post content to groupID (nil if so).
+func (s *Service) CanSend(ctx context.Context, groupID, userID string) error {
+	_, err := s.access(ctx, groupID, userID, true)
+	return err
+}
+
+// SharesSpace reports whether a and b share a domain or a Conclave.
+func (s *Service) SharesSpace(ctx context.Context, a, b string) (bool, error) {
+	return s.shareSpace(ctx, a, b)
+}
+
 // canModerate reports whether actorID may delete targetID's messages in a domain channel.
 func (s *Service) canModerate(ctx context.Context, groupID, actorID, targetID string) (bool, error) {
 	var domainID string
@@ -552,6 +569,7 @@ func (s *Service) userList(ctx context.Context, query string, arg string) ([]str
 type ConclaveMember struct {
 	UserID   string `json:"user_id"`
 	Callsign string `json:"callsign"`
+	Avatar   int64  `json:"avatar,omitempty"` // profile picture version, filled in by the server
 }
 
 // Conclave is a DM group the caller belongs to.

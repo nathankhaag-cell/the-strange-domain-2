@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/blobs"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
 )
@@ -141,7 +142,13 @@ func (s *Server) signOut(w http.ResponseWriter, r *http.Request, _ auth.Account)
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request, a auth.Account) {
-	writeJSON(w, map[string]any{"user_id": a.UserID, "device_id": a.DeviceID, "callsign": a.Callsign, "is_node_admin": a.IsNodeAdmin})
+	av, err := s.blobs.AvatarVersions(r.Context(), []string{a.UserID})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"user_id": a.UserID, "device_id": a.DeviceID, "callsign": a.Callsign,
+		"is_node_admin": a.IsNodeAdmin, "avatar": av[a.UserID]})
 }
 
 // ---- domains ----
@@ -213,6 +220,7 @@ func (s *Server) getDomain(w http.ResponseWriter, r *http.Request, a auth.Accoun
 		Callsign string `json:"callsign"`
 		RoleID   string `json:"role_id"`
 		Muted    bool   `json:"muted"`
+		Avatar   int64  `json:"avatar,omitempty"`
 	}
 	type channelJSON struct {
 		ID   string `json:"id"`
@@ -227,8 +235,17 @@ func (s *Server) getDomain(w http.ResponseWriter, r *http.Request, a auth.Accoun
 	for _, x := range roles {
 		resp.Roles = append(resp.Roles, roleJSON{x.ID, x.Name, x.Rank, uint64(x.Permissions)})
 	}
+	ids := make([]string, 0, len(members))
 	for _, m := range members {
-		resp.Members = append(resp.Members, memberJSON{m.UserID, m.Callsign, m.Role.ID, m.Muted})
+		ids = append(ids, m.UserID)
+	}
+	avatars, err := s.blobs.AvatarVersions(ctx, ids)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	for _, m := range members {
+		resp.Members = append(resp.Members, memberJSON{m.UserID, m.Callsign, m.Role.ID, m.Muted, avatars[m.UserID]})
 	}
 	for _, c := range channels {
 		resp.Channels = append(resp.Channels, channelJSON{c.ID, c.Name, c.Kind})
@@ -396,8 +413,10 @@ func writeErr(w http.ResponseWriter, err error) {
 		status = http.StatusForbidden
 	case errors.Is(err, relay.ErrNoKeys):
 		status = http.StatusNotFound
-	case errors.Is(err, relay.ErrTooLarge):
+	case errors.Is(err, relay.ErrTooLarge), errors.Is(err, blobs.ErrTooLarge), errors.Is(err, blobs.ErrQuota):
 		status = http.StatusRequestEntityTooLarge
+	case errors.Is(err, blobs.ErrTooPending):
+		status = http.StatusTooManyRequests
 	}
 	msg := err.Error()
 	if status == http.StatusInternalServerError {

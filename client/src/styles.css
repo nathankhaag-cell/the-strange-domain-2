@@ -958,6 +958,268 @@ input[type="radio"] {
   border: 1px solid var(--line);
 }
 
+/* ---- drawers (phones) ----
+   On wide screens the drawer wrappers vanish from layout. */
+
+.nav-drawer,
+.nav-cols {
+  display: contents;
+}
+.drawer-brand,
+.menu-btn,
+.scrim {
+  display: none;
+}
+.pane-titles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  min-width: 0;
+}
+
+/* ---- unread counts ---- */
+
+.chan-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.unread {
+  flex: 0 0 auto;
+  min-width: 22px;
+  padding: 0 5px;
+  background: var(--fg);
+  color: #000;
+  font-size: 15px;
+  line-height: 20px;
+  text-align: center;
+  letter-spacing: 0;
+}
+.rail-item {
+  position: relative;
+}
+.rail-unread {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+}
+.menu-btn {
+  position: relative;
+}
+.menu-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  background: var(--fg);
+}
+
+/* ---- profile pictures ---- */
+
+.has-pic {
+  padding: 0;
+  overflow: hidden;
+}
+.has-pic img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.member-pic {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.member-pic.has-pic {
+  border: 1px solid var(--fg-faint);
+}
+.me-pic {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.avatar-lg {
+  width: 96px;
+  height: 96px;
+  font-size: 48px;
+}
+.avatar-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.avatar-picker .crop {
+  width: 240px;
+  height: 240px;
+  max-width: 100%;
+  border: 1px solid var(--fg);
+  cursor: grab;
+  touch-action: none;
+  background: var(--bg-deep);
+}
+.avatar-picker input[type="range"] {
+  accent-color: var(--fg);
+  width: 240px;
+  max-width: 100%;
+}
+.row-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+.row-wrap .btn-primary {
+  align-self: center;
+}
+.key-line {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+}
+.key-line svg {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  color: var(--accent);
+}
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.check input {
+  margin-top: 5px;
+  width: 18px;
+  height: 18px;
+}
+.sidebar-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: -8px;
+}
+.sidebar-buttons .btn-small {
+  flex: 1 1 0;
+}
+.settings-device {
+  display: none;
+}
+
+/* ---- attachments ---- */
+
+.attachments {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.att-image {
+  display: block;
+  max-width: min(360px, 100%);
+  max-height: 320px;
+  padding: 0;
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  cursor: zoom-in;
+  overflow: hidden;
+  min-width: 80px;
+  min-height: 60px;
+}
+.att-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 318px;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.att-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--fg-faint);
+  max-width: min(420px, 100%);
+  min-width: 0;
+}
+.att-file svg {
+  flex: 0 0 auto;
+}
+.att-file-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.att-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+}
+.lightbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lightbox img {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  cursor: zoom-out;
+}
+.messages.dragging {
+  outline: 2px dashed var(--fg);
+  outline-offset: -8px;
+}
+.pending-files {
+  list-style: none;
+  margin: 0;
+  padding: 8px 20px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+}
+.pending-files li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 2px 10px;
+  border: 1px solid var(--fg-faint);
+  max-width: 100%;
+  min-width: 0;
+}
+.pending-files + .compose {
+  border-top: none;
+}
+.attach-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+}
+
 /* ---- narrow screens ---- */
 
 @media (max-width: 1100px) {
@@ -977,65 +1239,211 @@ input[type="radio"] {
   .members-toggle {
     display: inline-block;
   }
+  .scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    background: rgba(0, 0, 0, 0.6);
+  }
 }
 
+/* Phones: one pane at a time. The chat fills the screen; the domain and
+   Chapel list is a left drawer and the member list a right drawer. */
 @media (max-width: 720px) {
   html,
   body {
     font-size: 18px;
   }
-  .crt {
-    overflow: auto;
-  }
   .main {
-    height: auto;
-    min-height: 100%;
+    height: 100%;
   }
   .topbar {
-    padding: 8px 16px;
+    display: none;
   }
-  .brand-name {
+  .banner {
+    padding: 8px 16px;
+    font-size: 16px;
+  }
+  .body {
+    overflow: hidden;
+  }
+  .scrim {
+    position: fixed;
+    z-index: 25;
+  }
+  .nav-drawer {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(360px, 88vw);
+    background: var(--panel);
+    border-right: 1px solid var(--fg);
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.7);
+    transform: translateX(-105%);
+    visibility: hidden;
+    transition: transform 0.18s ease-out, visibility 0s linear 0.18s;
+  }
+  .nav-drawer.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.18s ease-out;
+  }
+  .drawer-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: #070707;
+  }
+  .drawer-brand .brand-name {
     font-size: 24px;
     letter-spacing: 3px;
   }
-  .brand-tag {
-    font-size: 12px;
-    letter-spacing: 1px;
-  }
-  .body {
-    flex-direction: column;
+  .nav-cols {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
   }
   .rail {
-    flex: 0 0 auto;
-    flex-direction: row;
-    padding: 8px 16px;
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    overflow-x: auto;
-  }
-  .rail-sep {
-    width: 0;
-    height: 32px;
-    border-top: none;
-    border-left: 1px solid var(--line);
+    flex: 0 0 68px;
   }
   .sidebar {
-    flex: 0 0 auto;
-    max-height: 38vh;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 12px;
     border-right: none;
-    border-bottom: 1px solid var(--line);
-    padding: 12px 16px;
+  }
+  .members {
+    display: flex;
+    position: fixed;
+    z-index: 30;
+    width: min(320px, 85vw);
+    border-left: 1px solid var(--fg);
+    transform: translateX(105%);
+    visibility: hidden;
+    transition: transform 0.18s ease-out, visibility 0s linear 0.18s;
+  }
+  .members.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.18s ease-out;
   }
   .pane {
     flex: 1 1 auto;
-    min-height: 60vh;
+    width: 100%;
   }
-  .messages,
-  .pane-head,
+  .pane-head {
+    flex-wrap: nowrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .pane-titles {
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0;
+    overflow: hidden;
+  }
+  .pane-title {
+    font-size: 22px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pane-sub {
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .pane-head .grow {
+    display: none;
+  }
+  .menu-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+  }
+  .empty-pane .menu-btn {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+  }
+  .empty-pane {
+    position: relative;
+  }
+  .pane-head .btn-small {
+    flex: 0 0 auto;
+    min-height: 44px;
+  }
+  .messages {
+    padding: 12px;
+    gap: 10px;
+  }
+  .msg {
+    padding: 8px;
+    gap: 10px;
+  }
+  .msg-delete {
+    min-height: 32px;
+  }
   .compose,
   .compose-note {
-    padding-left: 16px;
-    padding-right: 16px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .compose {
+    gap: 8px;
+    padding-top: 10px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+  .compose .prompt,
+  .compose .cursor {
+    display: none;
+  }
+  .compose input {
+    font-size: 20px;
+    min-height: 44px;
+  }
+  .compose .btn-primary {
+    min-height: 44px;
+    padding: 4px 14px;
+  }
+  .attach-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .pending-files {
+    padding: 8px 12px 0;
+  }
+  .chan,
+  .member {
+    min-height: 44px;
+  }
+  .rail-item,
+  .rail-add {
+    width: 48px;
+    height: 48px;
+  }
+  .btn-small,
+  .btn-tiny {
+    min-height: 36px;
+  }
+  .btn-icon {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .settings-device {
+    display: flex;
+  }
+  .att-image {
+    max-width: 100%;
   }
   .auth-hero,
   .auth-panel {
@@ -1051,10 +1459,6 @@ input[type="radio"] {
   }
 }
 
-.sidebar > .btn-small {
-  align-self: stretch;
-  margin-top: -8px;
-}
 .honorific select {
   width: 100%;
 }

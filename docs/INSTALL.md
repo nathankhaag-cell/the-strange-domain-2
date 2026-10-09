@@ -142,6 +142,15 @@ Browsers then use `https://192.168.1.20:8744`, and the apps keep using `192.168.
 
 On plain `http://`, messages are still end-to-end encrypted, but someone else on the same network could see sign-in tokens. HTTPS prevents that.
 
+## Attachments and storage
+
+Files people send (pictures, PDFs and so on) are encrypted on their device; the node only keeps the encrypted copies, in `blobs/` inside its data folder. Two options control how much space they may use:
+
+- `-max-upload-mb 25`: the largest file anyone can send (default 25 MB).
+- `-upload-quota-mb 1024`: how much each person may keep on the node in total (default 1024 MB).
+
+On a Raspberry Pi with a small SD card, lower both, for example `-max-upload-mb 10 -upload-quota-mb 200`. Deleting a message deletes its files; uploads that never got sent are removed after an hour.
+
 ## Signing (optional)
 
 Signing removes the warnings above and, for Android, lets new versions install over old ones. The release workflow signs automatically once these repository secrets exist (GitHub > Settings > Secrets and variables > Actions > New repository secret). Without them, everything still builds, unsigned.

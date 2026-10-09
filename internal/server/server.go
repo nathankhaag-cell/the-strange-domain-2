@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/blobs"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
@@ -32,26 +33,51 @@ type Server struct {
 	auth    *auth.Service
 	relay   *relay.Service
 	hub     *relay.Hub
+	blobs   *blobs.Service
 	started time.Time
 	mux     *http.ServeMux
 }
 
-func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Service, hub *relay.Hub) *Server {
-	s := &Server{st: st, dom: dom, auth: au, relay: rl, hub: hub, started: time.Now(), mux: http.NewServeMux()}
+// Option configures a Server.
+type Option func(*Server)
+
+// WithUploadLimits sets the largest attachment (bytes) and how much
+// attachment data each person may keep on the node. Zero keeps the default.
+func WithUploadLimits(maxSize, quota int64) Option {
+	return func(s *Server) {
+		if maxSize > 0 {
+			s.blobs.MaxSize = maxSize
+		}
+		if quota > 0 {
+			s.blobs.Quota = quota
+		}
+	}
+}
+
+func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Service, hub *relay.Hub, opts ...Option) *Server {
+	s := &Server{st: st, dom: dom, auth: au, relay: rl, hub: hub, blobs: blobs.NewService(st), started: time.Now(), mux: http.NewServeMux()}
+	for _, o := range opts {
+		o(s)
+	}
 	s.mux.HandleFunc("GET /healthz", s.healthz)
 	s.mux.HandleFunc("GET /api/v1/info", s.info)
 	s.routes()
 	s.relayRoutes()
 	s.deviceRoutes()
+	s.mediaRoutes()
 	web, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /", http.FileServer(http.FS(web)))
 	return s
 }
 
+// csp allows images from blob: URLs only so the client can show attachments
+// and profile pictures it decrypted or fetched itself; nothing else changes.
+const csp = "default-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'"
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", csp)
 	if allowAppOrigin(w, r) {
 		return // preflight answered
 	}

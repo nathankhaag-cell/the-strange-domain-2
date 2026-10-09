@@ -290,9 +290,9 @@ if (!app.requestSingleInstanceLock()) {
       callback(-3);
     });
 
-    // The client needs no camera, microphone, location or notifications yet.
-    // Copying (link codes, recovery codes) is the one thing it asks for.
-    const allowed = new Set(["clipboard-sanitized-write"]);
+    // The client needs no camera, microphone or location yet. It asks to copy
+    // (link codes, recovery codes) and to show message notifications.
+    const allowed = new Set(["clipboard-sanitized-write", "notifications"]);
     ses.setPermissionRequestHandler((_wc, permission, callback, details) => {
       callback(allowed.has(permission) && onNode(details.requestingUrl));
     });
