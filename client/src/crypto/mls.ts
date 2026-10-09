@@ -28,6 +28,7 @@ import {
   getCiphersuiteFromName,
   getCiphersuiteImpl,
   joinGroup,
+  mlsExporter,
   processMessage,
   zeroOutUint8Array,
   type CiphersuiteImpl,
@@ -455,6 +456,43 @@ export class MlsCrypto implements MessageCrypto {
       }
       throw new Error("the group kept changing; try again");
     });
+  }
+
+  // ---- calls ----
+
+  /**
+   * Makes sure this device is in the group so it can derive call keys:
+   * creates the group if nobody has (a Voice Relay that was never used),
+   * and adds any devices that are missing. Returns the group's status.
+   */
+  prepare(gid: string): Promise<GroupStatus> {
+    return this.lock(gid, async () => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await this.syncLocked(gid);
+        const rec = await this.load(gid);
+        const r = await this.commitChanges(gid, rec, !rec.state && rec.status === "empty");
+        if (r === "conflict") continue;
+        if (!rec.state) return rec.status;
+        return "ready";
+      }
+      return this.status(gid);
+    });
+  }
+
+  /**
+   * The call media key for the group's current epoch: 32 bytes from the MLS
+   * exporter (RFC 9420 section 8.5) with a label of its own, so it is
+   * independent of every message key. Everyone in the group at that epoch
+   * derives the same key; the node never can. Null when this device is not
+   * in the group.
+   */
+  async mediaKey(gid: string): Promise<{ epoch: number; key: Uint8Array } | null> {
+    const rec = await this.load(gid);
+    const state = rec.state;
+    if (!state) return null;
+    const epoch = Number(state.groupContext.epoch);
+    const key = await mlsExporter(state.keySchedule.exporterSecret, "strange-domain call media v1", utf8.encode(gid), 32, this.cs);
+    return { epoch, key };
   }
 
   // ---- membership ----

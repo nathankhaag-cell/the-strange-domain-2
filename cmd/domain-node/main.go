@@ -15,12 +15,15 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/rtc"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/server"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/tlsutil"
@@ -37,6 +40,14 @@ type options struct {
 	maxUploadMB   int64
 	uploadQuotaMB int64
 
+	// Calls (see internal/rtc and docs/INSTALL.md).
+	calls        bool
+	rtcUDPPort   int
+	rtcPortRange string
+	rtcTCPPort   int
+	rtcPublicIP  string
+	rtcVideo     bool
+
 	statusInterval time.Duration // 0: no status line
 	updateCheck    bool
 	out            io.Writer // start-up summary; nil: none
@@ -52,6 +63,12 @@ func main() {
 	flag.StringVar(&o.tlsListen, "tls-listen", "", "with a TLS option: serve HTTPS on this address and keep plain HTTP on -listen (for example :8744)")
 	flag.Int64Var(&o.maxUploadMB, "max-upload-mb", 25, "largest attachment people can send, in MB")
 	flag.Int64Var(&o.uploadQuotaMB, "upload-quota-mb", 1024, "attachment storage each person may use on this node, in MB")
+	flag.BoolVar(&o.calls, "rtc", true, "voice and video calls (Voice Relays, and calls in Confessions and Conclaves)")
+	flag.IntVar(&o.rtcUDPPort, "rtc-udp-port", 8745, "UDP port for all call media (allow it through the firewall); 0 uses -rtc-port-range")
+	flag.StringVar(&o.rtcPortRange, "rtc-port-range", "", "with -rtc-udp-port 0: UDP ports for call media, one per connection, for example 50000-50199 (empty: any)")
+	flag.IntVar(&o.rtcTCPPort, "rtc-tcp-port", 0, "also accept call media over TCP on this port, for networks that block UDP (0: off)")
+	flag.StringVar(&o.rtcPublicIP, "rtc-public-ip", "", "public IP address(es), comma-separated, to offer for calls when the node is behind NAT with the UDP port forwarded")
+	flag.BoolVar(&o.rtcVideo, "rtc-video", true, "allow cameras and screen sharing in calls (false: voice only, for slow links)")
 	flag.DurationVar(&o.statusInterval, "status-interval", time.Minute, "log a one-line traffic summary this often (0 turns it off)")
 	flag.BoolVar(&o.updateCheck, "update-check", true, "check GitHub for a newer release at start-up and once a day (needs internet; failures are ignored)")
 	logLevel := flag.String("log-level", "info", "log detail: debug (also logs every request), info, warn or error")
@@ -118,8 +135,21 @@ func run(ctx context.Context, o options, ready func(httpAddr, httpsAddr net.Addr
 	defer st.Close()
 	dom := domains.NewService(st)
 	hub := relay.NewHub()
-	handler := server.New(st, dom, auth.NewService(st, dom), relay.NewService(st, hub), hub,
-		server.WithUploadLimits(o.maxUploadMB<<20, o.uploadQuotaMB<<20))
+	rl := relay.NewService(st, hub)
+	opts := []server.Option{server.WithUploadLimits(o.maxUploadMB<<20, o.uploadQuotaMB<<20)}
+	var calls *rtc.SFU
+	if o.calls {
+		cfg, err := o.rtcConfig()
+		if err != nil {
+			return err
+		}
+		if calls, err = server.NewCallRelay(cfg, rl, hub); err != nil {
+			return fmt.Errorf("calls: %w (use another -rtc-udp-port, or -rtc=false to turn calls off)", err)
+		}
+		defer calls.Close()
+		opts = append(opts, server.WithCalls(calls))
+	}
+	handler := server.New(st, dom, auth.NewService(st, dom), rl, hub, opts...)
 	var updates *update.Checker
 	if o.updateCheck {
 		updates = &update.Checker{Current: server.Version}
@@ -188,6 +218,10 @@ func run(ctx context.Context, o options, ready func(httpAddr, httpsAddr net.Addr
 	if updates != nil && updates.Enabled() {
 		go updates.Run(bg, 24*time.Hour)
 	}
+	if calls != nil {
+		go calls.RunRecheck(bg, 30*time.Second)
+		slog.Info("calls on", "udp_port", o.rtcUDPPort, "tcp_port", o.rtcTCPPort, "video", o.rtcVideo, "public_ip", o.rtcPublicIP)
+	}
 	if o.statusInterval > 0 {
 		go statusLoop(bg, handler, o.statusInterval)
 	}
@@ -209,6 +243,37 @@ func run(ctx context.Context, o options, ready func(httpAddr, httpsAddr net.Addr
 		}
 	}
 	return runErr
+}
+
+// rtcConfig reads the -rtc-* flags.
+func (o options) rtcConfig() (rtc.Config, error) {
+	cfg := rtc.Config{UDPPort: o.rtcUDPPort, TCPPort: o.rtcTCPPort, Video: o.rtcVideo}
+	if o.rtcUDPPort < 0 || o.rtcUDPPort > 65535 || o.rtcTCPPort < 0 || o.rtcTCPPort > 65535 {
+		return cfg, errors.New("-rtc-udp-port and -rtc-tcp-port must be 0 to 65535")
+	}
+	if o.rtcPortRange != "" {
+		lo, hi, ok := strings.Cut(o.rtcPortRange, "-")
+		a, err1 := strconv.ParseUint(strings.TrimSpace(lo), 10, 16)
+		b, err2 := strconv.ParseUint(strings.TrimSpace(hi), 10, 16)
+		if !ok || err1 != nil || err2 != nil || a == 0 || b < a {
+			return cfg, errors.New("-rtc-port-range must look like 50000-50199")
+		}
+		if o.rtcUDPPort != 0 {
+			return cfg, errors.New("-rtc-port-range needs -rtc-udp-port 0")
+		}
+		cfg.PortMin, cfg.PortMax = uint16(a), uint16(b)
+	}
+	for _, ip := range strings.Split(o.rtcPublicIP, ",") {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		if net.ParseIP(ip) == nil {
+			return cfg, fmt.Errorf("-rtc-public-ip: %q is not an IP address", ip)
+		}
+		cfg.PublicIPs = append(cfg.PublicIPs, ip)
+	}
+	return cfg, nil
 }
 
 // defaultDataDir picks a per-user location that works on Windows, macOS and Linux.

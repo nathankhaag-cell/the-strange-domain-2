@@ -13,6 +13,7 @@ import (
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/blobs"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/relay"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/rtc"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/update"
 )
@@ -40,6 +41,7 @@ type Server struct {
 	handler http.Handler
 	metrics *Metrics
 	updates *update.Checker
+	rtc     *rtc.SFU // nil: calls are off
 }
 
 // Option configures a Server.
@@ -70,6 +72,7 @@ func New(st *store.Store, dom *domains.Service, au *auth.Service, rl *relay.Serv
 	s.deviceRoutes()
 	s.mediaRoutes()
 	s.adminRoutes()
+	s.callRoutes()
 	web, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /", http.FileServer(http.FS(web)))
 	s.handler = s.instrument(http.HandlerFunc(s.serve))
@@ -161,6 +164,6 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		// See compat.go.
 		"api":            APILevel,
 		"min_client_api": MinClientAPI,
-		"features":       Features,
+		"features":       s.features(),
 	})
 }

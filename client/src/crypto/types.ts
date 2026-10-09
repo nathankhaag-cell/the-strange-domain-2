@@ -40,6 +40,10 @@ export interface MessageCrypto {
   takeWelcomes(): Promise<string[]>;
   /** Add devices that belong in the group and remove people who left and revoked devices. */
   reconcile(groupId: string): Promise<void>;
+  /** Creates the group if needed and adds missing devices (before a call). */
+  prepare(groupId: string): Promise<GroupStatus>;
+  /** The call media key for the group's current epoch (see mls.ts). */
+  mediaKey(groupId: string): Promise<{ epoch: number; key: Uint8Array } | null>;
   /** Called after any change the UI should show. */
   onChange(fn: (groupId: string) => void): void;
   /** Called for each message from another device that was just decrypted. */

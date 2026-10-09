@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -143,5 +145,40 @@ func TestTLSFlagValidation(t *testing.T) {
 		if _, err := o.tlsConfig(); err == nil {
 			t.Errorf("%+v accepted", o)
 		}
+	}
+}
+
+func TestRTCFlags(t *testing.T) {
+	cfg, err := options{rtcUDPPort: 0, rtcPortRange: "50000-50199", rtcPublicIP: "203.0.113.7, 2001:db8::1", rtcVideo: true}.rtcConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PortMin != 50000 || cfg.PortMax != 50199 || len(cfg.PublicIPs) != 2 || !cfg.Video {
+		t.Fatalf("config: %+v", cfg)
+	}
+	for _, o := range []options{
+		{rtcUDPPort: 8745, rtcPortRange: "50000-50199"}, // a range needs -rtc-udp-port 0
+		{rtcPortRange: "50199-50000"},
+		{rtcPortRange: "lots"},
+		{rtcPublicIP: "my-router"},
+		{rtcUDPPort: 70000},
+	} {
+		if _, err := o.rtcConfig(); err == nil {
+			t.Errorf("%+v accepted", o)
+		}
+	}
+}
+
+func TestNodeWithCalls(t *testing.T) {
+	addr, _ := startNode(t, options{listen: "127.0.0.1:0", dataDir: t.TempDir(), calls: true, rtcUDPPort: 0, rtcVideo: false})
+	res, err := http.Get("http://" + addr + "/api/v1/info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var info struct{ Features []string }
+	json.NewDecoder(res.Body).Decode(&info)
+	if !slices.Contains(info.Features, "calls") || slices.Contains(info.Features, "video") {
+		t.Fatalf("features: %v", info.Features)
 	}
 }

@@ -174,6 +174,54 @@ Files people send (pictures, PDFs and so on) are encrypted on their device; the 
 
 On a Raspberry Pi with a small SD card, lower both, for example `-max-upload-mb 10 -upload-quota-mb 200`. Deleting a message deletes its files; uploads that never got sent are removed after an hour.
 
+## Voice and video calls
+
+People can talk in a domain's **Voice Relays** (Join, Leave, Mute, push to talk, Camera, Share screen) and call each other in **Confessions** and **Conclaves** (Call or Video call; the others hear a ringing sound and see Answer and Decline).
+
+Calls are end-to-end encrypted. Every sound and picture is encrypted on the speaker's device with a key that comes from the chat's MLS group, the same encryption messages use. The node passes the encrypted media on to the others in the call; it cannot hear or see it.
+
+### Ports and firewalls
+
+The node carries call media over **UDP port 8745** (in addition to TCP 8743 for the app itself).
+
+- **On a home network or mesh network with no internet:** nothing else is needed, as long as the computer's firewall lets UDP 8745 in.
+  - Windows: the first time the node starts, allow it on **Private networks** when Windows asks. To add the rule by hand: `netsh advfirewall firewall add rule name="Strange Domain calls" dir=in action=allow protocol=UDP localport=8745`.
+  - macOS: allow incoming connections for `domain-node` when asked (System Settings > Network > Firewall).
+  - Raspberry Pi / Linux with ufw: `sudo ufw allow 8743/tcp` and `sudo ufw allow 8745/udp`.
+- **Reaching the node from the internet** (the node at home, people calling in from elsewhere): on your router, forward **TCP 8743** (or your HTTPS port) and **UDP 8745** to the node computer, and tell the node your public IP address so it can offer it to callers:
+
+  ```
+  ExecStart=/usr/local/bin/domain-node -listen :8743 -data /var/lib/strange-domain -rtc-public-ip 203.0.113.7
+  ```
+
+  Use your router's public address in place of `203.0.113.7` (a search for "what is my IP" shows it). People on the home network keep using the local address. If your public address changes from time to time, update the option when it does.
+- **A cloud server:** open TCP 8743 and UDP 8745 in its firewall or security group. If the server only knows its private address (most clouds), add `-rtc-public-ip` with its public address.
+
+Options:
+
+| Option | What it does |
+| --- | --- |
+| `-rtc-udp-port 8745` | The UDP port for all call media. |
+| `-rtc-udp-port 0 -rtc-port-range 50000-50199` | Use a range of UDP ports instead, one per person in a call. |
+| `-rtc-tcp-port 8746` | Also carry call media over TCP on this port, for networks that block UDP (off by default). Forward or open it like the UDP port. |
+| `-rtc-public-ip <address>` | Public address(es), comma-separated, offered to callers as well as the computer's own addresses. |
+| `-rtc-video=false` | Voice only: no cameras or screen sharing. Use it on slow links (mesh networks, a Pi on Wi-Fi). |
+| `-rtc=false` | Turn calls off. |
+
+No STUN or TURN server is needed: everyone in a call connects to the node itself, so if they can reach the node's UDP (or TCP) call port, the call works. The node therefore has no TURN server built in.
+
+### Bandwidth
+
+Calls are tuned for a Raspberry Pi and slow links: voice uses about 32 kbit/s per speaker (plus about 12 kbit/s of encryption overhead), cameras at most 640x360 at 15 frames per second (about 500 kbit/s), and screen sharing at most 1280x720 at 5 frames per second (about 800 kbit/s). The node forwards each person's media to everyone else in the call, so its upload is roughly what each person sends times the number of other people. A Pi 4 handles a family-sized voice call easily. The **Node admin** view shows how many calls are running, how many people are in them and the media traffic.
+
+### What works where
+
+- **Desktop app, Chrome, Edge, and the Android app:** everything. Firefox and Safari use a different (standard) way to encrypt call media, which this client supports but which has had less testing.
+- A browser that cannot encrypt call media cannot join calls; it says so instead of joining without encryption.
+- A browser on another computer needs HTTPS (see above) for the microphone and camera, as it does for the rest of the client.
+- **Android:** the phone asks for the microphone (and the camera, for video) the first time a call needs it. Calls only continue while the app is open: Android pauses the app soon after it goes to the background or the screen turns off, which ends the call, and an incoming call only rings while the app is open.
+- People muted in a domain can join its Voice Relays to listen but cannot be heard. Roles without the Voice Relay permission (Postulants by default) cannot join.
+
 ## Signing (optional)
 
 Signing removes the warnings above and, for Android, lets new versions install over old ones. The release workflow signs automatically once these repository secrets exist (GitHub > Settings > Secrets and variables > Actions > New repository secret). Without them, everything still builds, unsigned.

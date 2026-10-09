@@ -79,6 +79,7 @@ func (s *Server) revokeDevice(w http.ResponseWriter, r *http.Request, a auth.Acc
 	}
 	s.hub.Notify([]string{a.UserID}, relay.Event{Type: "device_revoked", GroupID: id})
 	s.notifyPeers(r.Context(), a.UserID, "devices", a.UserID)
+	s.recheckCalls() // a revoked device leaves any call it is in
 	w.WriteHeader(http.StatusNoContent)
 }
 
