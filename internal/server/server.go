@@ -3,12 +3,13 @@ package server
 
 import (
 	"embed"
-	"encoding/json"
 	"io/fs"
 	"net/http"
 	"runtime"
 	"time"
 
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
 )
 
@@ -24,14 +25,17 @@ var Version = "dev"
 
 type Server struct {
 	st      *store.Store
+	dom     *domains.Service
+	auth    *auth.Service
 	started time.Time
 	mux     *http.ServeMux
 }
 
-func New(st *store.Store) *Server {
-	s := &Server{st: st, started: time.Now(), mux: http.NewServeMux()}
+func New(st *store.Store, dom *domains.Service, au *auth.Service) *Server {
+	s := &Server{st: st, dom: dom, auth: au, started: time.Now(), mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /healthz", s.healthz)
 	s.mux.HandleFunc("GET /api/v1/info", s.info)
+	s.routes()
 	web, _ := fs.Sub(webFS, "web")
 	s.mux.Handle("GET /", http.FileServer(http.FS(web)))
 	return s
@@ -59,9 +63,4 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		"platform": runtime.GOOS + "/" + runtime.GOARCH,
 		"uptime_s": int(time.Since(s.started).Seconds()),
 	})
-}
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
 }

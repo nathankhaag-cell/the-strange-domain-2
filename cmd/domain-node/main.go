@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/auth"
+	"github.com/nathankhaag-cell/the-strange-domain-2/internal/domains"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/server"
 	"github.com/nathankhaag-cell/the-strange-domain-2/internal/store"
 )
@@ -44,10 +46,11 @@ func run(listen, dataDir string) error {
 		return fmt.Errorf("open store: %w", err)
 	}
 	defer st.Close()
+	dom := domains.NewService(st)
 
 	srv := &http.Server{
 		Addr:              listen,
-		Handler:           server.New(st),
+		Handler:           server.New(st, dom, auth.NewService(st, dom)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)

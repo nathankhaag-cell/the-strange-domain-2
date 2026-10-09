@@ -355,7 +355,7 @@ func (s *Service) Roles(ctx context.Context, domainID string) ([]Role, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Role
+	out := []Role{}
 	for rows.Next() {
 		var r Role
 		var p int64
@@ -378,7 +378,7 @@ func (s *Service) Members(ctx context.Context, domainID string) ([]Member, error
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Member
+	out := []Member{}
 	for rows.Next() {
 		var m Member
 		var p int64
@@ -446,4 +446,74 @@ func (s *Service) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// CheckInvite reports whether token is a usable invite without consuming it.
+func (s *Service) CheckInvite(ctx context.Context, token string) error {
+	var maxUses, uses int
+	var expires int64
+	err := s.st.DB.QueryRowContext(ctx,
+		`SELECT max_uses, uses, expires_at FROM invites WHERE token = ?`, token).Scan(&maxUses, &uses, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrInvalidInvite
+	}
+	if err != nil {
+		return err
+	}
+	if (maxUses > 0 && uses >= maxUses) || (expires > 0 && s.now().Unix() >= expires) {
+		return ErrInvalidInvite
+	}
+	return nil
+}
+
+// DomainsForUser lists the domains userID belongs to.
+func (s *Service) DomainsForUser(ctx context.Context, userID string) ([]Domain, error) {
+	rows, err := s.st.DB.QueryContext(ctx,
+		`SELECT d.id, d.name, d.owner_id FROM domains d JOIN members m ON m.domain_id = d.id
+		  WHERE m.user_id = ? ORDER BY d.name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Domain{}
+	for rows.Next() {
+		var d Domain
+		if err := rows.Scan(&d.ID, &d.Name, &d.OwnerID); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// Channels lists a domain's channels in display order.
+func (s *Service) Channels(ctx context.Context, domainID string) ([]Channel, error) {
+	rows, err := s.st.DB.QueryContext(ctx,
+		`SELECT id, domain_id, name, kind FROM channels WHERE domain_id = ? ORDER BY position`, domainID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Channel{}
+	for rows.Next() {
+		var c Channel
+		if err := rows.Scan(&c.ID, &c.DomainID, &c.Name, &c.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// RequireMember returns ErrNotMember unless userID belongs to domainID.
+func (s *Service) RequireMember(ctx context.Context, domainID, userID string) error {
+	var n int
+	if err := s.st.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM members WHERE domain_id = ? AND user_id = ?`, domainID, userID).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotMember
+	}
+	return nil
 }
