@@ -30,6 +30,7 @@ import { actorFor, canActOn, has, roleBadge } from "./perms";
 import { CallBar, CallButtons, ConclaveCall, IncomingCall, RelayRoster, VoicePane } from "./Call";
 import {
   AddDomainModal,
+  BansModal,
   ChannelModal,
   ConclaveModal,
   DevicesModal,
@@ -44,6 +45,7 @@ type ModalKind =
   | { kind: "conclave" }
   | { kind: "devices" }
   | { kind: "settings" }
+  | { kind: "bans" }
   | { kind: "member"; userId: string };
 
 type Drawer = "left" | "right" | null;
@@ -262,6 +264,7 @@ export function Main() {
             inert={phone && drawer !== "right"}
             onMember={(userId) => setModal({ kind: "member", userId })}
             onSummons={() => setModal({ kind: "summons" })}
+            onBans={() => setModal({ kind: "bans" })}
           />
         )}
         {drawer && <div class="scrim" aria-hidden="true" onClick={() => setDrawer(null)} />}
@@ -270,6 +273,7 @@ export function Main() {
       {modal?.kind === "addDomain" && <AddDomainModal onClose={close} />}
       {modal?.kind === "channel" && domain && <ChannelModal domainId={domain.id} onClose={close} />}
       {modal?.kind === "summons" && domain && <SummonsModal domainId={domain.id} onClose={close} />}
+      {modal?.kind === "bans" && domain && <BansModal domainId={domain.id} onClose={close} />}
       {modal?.kind === "conclave" && <ConclaveModal onClose={close} />}
       {modal?.kind === "devices" && <DevicesModal onClose={close} />}
       {modal?.kind === "settings" && <SettingsModal onClose={close} onNodeAdmin={() => { close(); setNodeAdmin(true); }} />}
@@ -747,6 +751,7 @@ function MemberList(props: {
   inert: boolean;
   onMember: (userId: string) => void;
   onSummons: () => void;
+  onBans: () => void;
 }) {
   const { app, detail } = props;
   const me = app.me ? actorFor(app, props.domainId, app.me.user_id) : undefined;
@@ -785,6 +790,11 @@ function MemberList(props: {
       {me && has(me, Perm.CreateInvite) && (
         <button type="button" class="btn-outline" onClick={props.onSummons}>
           CREATE SUMMONS
+        </button>
+      )}
+      {me && has(me, Perm.Ban) && nodeHas(app.info, "bans") && (
+        <button type="button" class="btn-outline" onClick={props.onBans}>
+          BANS
         </button>
       )}
     </aside>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { JSX } from "preact";
-import { api, Perm, RANK_OWNER, type Device } from "../api";
+import { api, Perm, type Ban, type Device } from "../api";
+import { has as nodeHas } from "../compat";
 import {
   acceptSummons,
   createChannel,
@@ -15,7 +16,7 @@ import {
 } from "../app";
 import { newRecoveryCode } from "../keys";
 import { Field, Modal, errText } from "./common";
-import { actorFor, canActOn, has, roleBadge } from "./perms";
+import { actorFor, canActOn, canLiftBan, grantableRoles, has, roleBadge } from "./perms";
 
 function useAction() {
   const [busy, setBusy] = useState(false);
@@ -186,6 +187,7 @@ export function MemberModal({ domainId, userId, onClose }: { domainId: string; u
   const me = app.me ? actorFor(app, domainId, app.me.user_id) : undefined;
   const target = actorFor(app, domainId, userId);
   const [reason, setReason] = useState("");
+  const [banFor, setBanFor] = useState(BAN_LENGTHS[0].seconds);
   const a = useAction();
   if (!detail || !member || !me || !target) {
     return (
@@ -195,8 +197,10 @@ export function MemberModal({ domainId, userId, onClose }: { domainId: string; u
     );
   }
   const isMe = userId === app.me?.user_id;
-  const grantable = detail.roles.filter((r) => r.rank < (me.isOwner ? RANK_OWNER : me.rank) && r.id !== member.role_id);
-  const canRole = !isMe && canActOn(me, Perm.ManageRoles, target) && grantable.length > 0;
+  const grantable = isMe ? [] : grantableRoles(me, target, detail.roles, member.role_id);
+  const canRole = grantable.length > 0;
+  const timedBans = nodeHas(app.info, "bans");
+  const length = BAN_LENGTHS.find((l) => l.seconds === banFor) ?? BAN_LENGTHS[0];
   const canMute = !isMe && canActOn(me, Perm.Mute, target);
   const canKick = !isMe && canActOn(me, Perm.Kick, target);
   const canBan = !isMe && canActOn(me, Perm.Ban, target);
@@ -271,12 +275,30 @@ export function MemberModal({ domainId, userId, onClose }: { domainId: string; u
         )}
         {canBan && (
           <>
+            {timedBans && (
+              <label class="field">
+                <span>Ban length</span>
+                <select value={String(banFor)} onChange={(e) => setBanFor(Number((e.target as HTMLSelectElement).value))}>
+                  {BAN_LENGTHS.map((l) => (
+                    <option value={String(l.seconds)}>{l.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <Field id="reason" label="Ban reason (optional)" value={reason} onInput={setReason} maxLength={200} />
             <button
               type="button"
               class="btn-danger"
               disabled={a.busy}
-              onClick={() => confirm(`Ban ${member.callsign}?`) && act(() => api.ban(domainId, userId, reason), true)}
+              onClick={() =>
+                confirm(
+                  !timedBans
+                    ? `Ban ${member.callsign}?`
+                    : length.seconds === 0
+                      ? `Ban ${member.callsign} permanently?`
+                      : `Ban ${member.callsign} for ${length.label}?`,
+                ) && act(() => api.ban(domainId, userId, reason, timedBans ? length.seconds : undefined), true)
+              }
             >
               Ban
             </button>
@@ -285,6 +307,74 @@ export function MemberModal({ domainId, userId, onClose }: { domainId: string; u
         {!isMe && !canRole && !canMute && !canKick && !canBan && has(me, Perm.Kick) && (
           <p class="muted small">You cannot act on someone of equal or higher rank.</p>
         )}
+        {a.err && <div class="error">{a.err}</div>}
+      </div>
+    </Modal>
+  );
+}
+
+/** Ban lengths offered when banning; 0 is permanent. */
+const BAN_LENGTHS = [
+  { seconds: 3600, label: "1 hour" },
+  { seconds: 24 * 3600, label: "24 hours" },
+  { seconds: 7 * 24 * 3600, label: "7 days" },
+  { seconds: 30 * 24 * 3600, label: "30 days" },
+  { seconds: 0, label: "Permanent" },
+];
+
+/** How long a ban has left, e.g. "3 days left". */
+function timeLeft(expiresAt: number, nowMs: number): string {
+  if (expiresAt === 0) return "Permanent";
+  const s = expiresAt - Math.floor(nowMs / 1000);
+  const n = (v: number, unit: string) => `${v} ${unit}${v === 1 ? "" : "s"} left`;
+  if (s >= 86400) return n(Math.floor(s / 86400), "day");
+  if (s >= 3600) return n(Math.floor(s / 3600), "hour");
+  if (s >= 60) return n(Math.floor(s / 60), "minute");
+  return "Less than a minute left";
+}
+
+export function BansModal({ domainId, onClose }: { domainId: string; onClose: () => void }) {
+  const app = useApp();
+  const me = app.me ? actorFor(app, domainId, app.me.user_id) : undefined;
+  const [bans, setBans] = useState<Ban[] | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const a = useAction();
+  const load = () => a.run(async () => setBans(await api.bans(domainId)));
+  // Reload when the domain changes (a ban, an unban or an expired ban).
+  useEffect(() => void load(), [domainId, app.details[domainId]]);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  const shown = (bans ?? []).filter((b) => b.expires_at === 0 || b.expires_at * 1000 > now);
+  return (
+    <Modal title="Bans" onClose={onClose}>
+      <div class="modal-form">
+        {bans && shown.length === 0 && <p>No one is banned.</p>}
+        <ul class="device-list">
+          {shown.map((b) => (
+            <li>
+              <div>
+                <div>{b.callsign}</div>
+                <div class="muted small">
+                  {timeLeft(b.expires_at, now)}
+                  {b.banned_by && ` · Banned by ${b.banned_by}`}
+                </div>
+                {b.reason && <div class="muted small">Reason: {b.reason}</div>}
+              </div>
+              {me && canLiftBan(me, b.former_rank) && (
+                <button
+                  type="button"
+                  class="btn-outline btn-small"
+                  disabled={a.busy}
+                  onClick={() => confirm(`Unban ${b.callsign}?`) && a.run(() => moderate(domainId, () => api.unban(domainId, b.user_id)))}
+                >
+                  Unban
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
         {a.err && <div class="error">{a.err}</div>}
       </div>
     </Modal>
