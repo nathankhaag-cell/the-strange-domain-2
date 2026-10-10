@@ -26,6 +26,9 @@ const { isSafeAccelerator } = require("./accelerator");
 
 const CONNECT_PAGE = path.join(__dirname, "connect.html");
 const CONNECT_URL = pathToFileURL(CONNECT_PAGE).href;
+// The title bar for clients that predate it; see addLegacyTitlebar.
+const LEGACY_TITLEBAR_CSS = fs.readFileSync(path.join(__dirname, "legacy-titlebar.css"), "utf8");
+const LEGACY_TITLEBAR_JS = fs.readFileSync(path.join(__dirname, "titlebar.js"), "utf8");
 
 // ---- saved node ----
 
@@ -261,6 +264,36 @@ function createWindow() {
     openExternal(url);
     return { action: "deny" };
   });
+  // A node still running client 1.1.0 or older draws no title bar, which
+  // leaves the frameless window with no controls. Once the page has had
+  // time to draw its own bar, add the connect page's bar if it has none.
+  // A full-screen page shows no bar either, so the check waits until the
+  // window leaves full screen.
+  let titlebarCheck = false;
+  const addLegacyTitlebar = async () => {
+    if (!titlebarCheck || !win || win.isFullScreen()) return;
+    titlebarCheck = false;
+    const url = wc.getURL();
+    try {
+      const drawn = await wc.executeJavaScript(
+        `new Promise((done) => { let n = 0; const look = () => document.querySelector(".titlebar") ? done(true) : ++n >= 40 ? done(false) : setTimeout(look, 100); look(); })`,
+      );
+      if (drawn || !win || wc.getURL() !== url) return;
+      if (win.isFullScreen()) {
+        titlebarCheck = true;
+        return;
+      }
+      await wc.insertCSS(LEGACY_TITLEBAR_CSS);
+      await wc.executeJavaScript(LEGACY_TITLEBAR_JS);
+    } catch {
+      /* the page navigated away */
+    }
+  };
+  wc.on("did-finish-load", () => {
+    titlebarCheck = onNode(wc.getURL());
+    void addLegacyTitlebar();
+  });
+  win.on("leave-full-screen", () => void addLegacyTitlebar());
   wc.on("did-fail-load", (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3 /* aborted */ || !current || !onNode(url)) return;
     showConnect(`Could not load ${current.url} (${desc}). Check that the node is running, then connect again.`);

@@ -1,0 +1,60 @@
+/* The title bar for a node whose client predates it (client 1.1.0 and
+   older). The window has no system frame, so without this such a client
+   would leave no way to minimize, maximize or close it. main.js adds this
+   and titlebar.js to the page only when the client draws no bar itself.
+   Colors are written out because older clients name theirs differently. */
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2147483647;
+  height: 32px;
+  display: flex;
+  align-items: stretch;
+  background: #070707;
+  border-bottom: 1px solid #0f3d1d;
+  color: #3fd16a;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+.titlebar[hidden] {
+  display: none;
+}
+.titlebar[data-platform="darwin"] {
+  padding-left: 78px; /* the traffic lights */
+}
+.tb-fill {
+  flex: 1 1 auto;
+}
+.tb-btn {
+  -webkit-app-region: no-drag;
+  width: 46px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #3fd16a;
+  cursor: pointer;
+  box-shadow: none;
+}
+.tb-btn:hover {
+  background: rgba(0, 255, 65, 0.1);
+  color: #00ff41;
+}
+.tb-btn.tb-close:hover {
+  background: #ff5c5c;
+  color: #000;
+}
+.tb-btn:focus-visible {
+  outline: 2px solid #00ff41;
+  outline-offset: -2px;
+}
+html.has-titlebar body {
+  box-sizing: border-box;
+  padding-top: 32px;
+}

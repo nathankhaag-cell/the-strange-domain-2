@@ -1,7 +1,8 @@
 // The connect page's title bar. The window has no system frame, so the page
-// draws the bar: the app menu, the name, full screen, and on Windows and
-// Linux minimize, maximize/restore and close. The node's client draws the
-// same bar (client/src/ui/TitleBar.tsx) once it has loaded.
+// draws the bar: the app menu, full screen, and on Windows and Linux
+// minimize, maximize/restore and close. The node's client draws the same bar
+// (client/src/ui/TitleBar.tsx) once it has loaded; main.js adds this one to
+// a node whose client is too old to draw it.
 "use strict";
 
 (() => {
