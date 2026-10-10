@@ -199,33 +199,6 @@ html.has-titlebar body {
 .titlebar[data-platform="darwin"] {
   padding-left: 78px; /* the traffic lights */
 }
-.tb-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  font-size: 18px;
-  letter-spacing: 3px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.tb-badge {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--fg);
-  color: #000;
-  font-size: 15px;
-  letter-spacing: 0;
-}
-.titlebar.blurred .tb-title {
-  color: var(--fg-faint);
-}
-.titlebar.blurred .tb-badge {
-  background: var(--fg-faint);
-}
 .tb-fill {
   flex: 1 1 auto;
 }

@@ -1,6 +1,6 @@
 // The desktop app's title bar. The window has no system frame, so the
-// client draws one: the app menu (File, Edit, View, Window), the name, full
-// screen, and on Windows and Linux minimize, maximize/restore and close.
+// client draws one: the app menu (File, Edit, View, Window), full screen,
+// and on Windows and Linux minimize, maximize/restore and close.
 // macOS keeps its own traffic lights at the left. In full screen the bar is
 // hidden; F11 brings the window back. Rendered only in the desktop app.
 
@@ -45,12 +45,6 @@ export function TitleBar() {
           const b = e.currentTarget as HTMLElement;
           d.showMenu(b.getBoundingClientRect().left, b.parentElement!.getBoundingClientRect().bottom);
         })}
-      <div class="tb-title">
-        <span class="tb-badge" aria-hidden="true">
-          74
-        </span>
-        <span>THE STRANGE DOMAIN</span>
-      </div>
       <div class="tb-fill" />
       {btn("Full screen (F11)", FULLSCREEN, () => d.toggleFullscreen())}
       {!mac && btn("Minimize", MINIMIZE, () => d.minimize())}

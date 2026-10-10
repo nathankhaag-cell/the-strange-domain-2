@@ -42,10 +42,6 @@
     });
     bar.append(menu);
   }
-  const title = document.createElement("div");
-  title.className = "tb-title";
-  title.innerHTML = '<span class="tb-badge" aria-hidden="true">74</span><span>THE STRANGE DOMAIN</span>';
-  bar.append(title);
   const fill = document.createElement("div");
   fill.className = "tb-fill";
   bar.append(fill);
