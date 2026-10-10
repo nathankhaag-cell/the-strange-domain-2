@@ -39,7 +39,7 @@ var DefaultRoles = []DefaultRole{
 	{Name: "Bishop", Rank: perm.RankSeniorMod, Permissions: perm.ManageChannels | perm.ManageRoles |
 		perm.CreateInvite | perm.Kick | perm.Ban | perm.Mute | perm.DeleteMessages | perm.PinMessages |
 		perm.SendMessages | perm.JoinVoice},
-	{Name: "Warden", Rank: perm.RankModerator, Permissions: perm.CreateInvite | perm.Kick | perm.Mute |
+	{Name: "Warden", Rank: perm.RankModerator, Permissions: perm.CreateInvite | perm.Kick | perm.Ban | perm.Mute |
 		perm.DeleteMessages | perm.PinMessages | perm.SendMessages | perm.JoinVoice},
 	{Name: "Brother / Sister", Rank: perm.RankMember, Permissions: perm.CreateInvite | perm.SendMessages | perm.JoinVoice,
 		IsDefault: true},
@@ -194,14 +194,14 @@ func (s *Service) JoinByInvite(ctx context.Context, token, userID string) (Domai
 		if (maxUses > 0 && uses >= maxUses) || (expires > 0 && s.now().Unix() >= expires) {
 			return ErrInvalidInvite
 		}
-		var n int
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM bans WHERE domain_id = ? AND user_id = ?`, d.ID, userID).Scan(&n); err != nil {
+		banned, err := s.activeBan(ctx, tx, d.ID, userID)
+		if err != nil {
 			return err
 		}
-		if n > 0 {
+		if banned {
 			return ErrBanned
 		}
+		var n int
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM members WHERE domain_id = ? AND user_id = ?`, d.ID, userID).Scan(&n); err != nil {
 			return err
@@ -228,8 +228,12 @@ func (s *Service) JoinByInvite(ctx context.Context, token, userID string) (Domai
 	return d, err
 }
 
-// AssignRole gives targetID the role roleID. The actor must outrank both the
-// target's current role and the new role.
+// AssignRole gives targetID the role roleID. The actor needs ManageRoles (the
+// owner always has it) and must outrank both the target's current role and
+// the new role. With the default roles: the Abbot may set anyone else to
+// Bishop, Warden, Brother / Sister or Postulant; a Bishop may set people
+// below Bishop to Warden, Brother / Sister or Postulant; Wardens and below
+// cannot change roles. Nobody can hand out the owner role.
 func (s *Service) AssignRole(ctx context.Context, domainID, actorID, targetID, roleID string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		a, err := s.actor(ctx, tx, domainID, actorID)
@@ -241,7 +245,9 @@ func (s *Service) AssignRole(ctx context.Context, domainID, actorID, targetID, r
 			return err
 		}
 		var rank int
-		err = tx.QueryRowContext(ctx, `SELECT rank FROM roles WHERE id = ? AND domain_id = ?`, roleID, domainID).Scan(&rank)
+		var name string
+		err = tx.QueryRowContext(ctx, `SELECT rank, name FROM roles WHERE id = ? AND domain_id = ?`, roleID, domainID).
+			Scan(&rank, &name)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -255,7 +261,7 @@ func (s *Service) AssignRole(ctx context.Context, domainID, actorID, targetID, r
 			`UPDATE members SET role_id = ? WHERE domain_id = ? AND user_id = ?`, roleID, domainID, targetID); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, domainID, actorID, "member.role", targetID, roleID)
+		return s.audit(ctx, tx, domainID, actorID, "member.role", targetID, fmt.Sprintf("%s (%s)", name, roleID))
 	})
 }
 
@@ -270,22 +276,45 @@ func (s *Service) Kick(ctx context.Context, domainID, actorID, targetID string) 
 	})
 }
 
-// Ban removes targetID and blocks them from rejoining.
-func (s *Service) Ban(ctx context.Context, domainID, actorID, targetID, reason string) error {
+// Ban removes targetID (like a kick) and blocks them from rejoining. A
+// duration of 0 makes the ban permanent; otherwise it lifts itself once the
+// duration has passed. The actor needs the ban permission and must outrank
+// the target.
+func (s *Service) Ban(ctx context.Context, domainID, actorID, targetID, reason string, duration time.Duration) error {
+	if duration < 0 || len(reason) > 200 {
+		return fmt.Errorf("%w: ban needs a duration of 0 (permanent) or more and a reason of up to 200 characters", ErrInvalidInput)
+	}
 	return s.moderate(ctx, domainID, actorID, targetID, perm.Ban, func(tx *sql.Tx) error {
+		t, err := s.actor(ctx, tx, domainID, targetID)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM members WHERE domain_id = ? AND user_id = ?`, domainID, targetID); err != nil {
 			return err
 		}
+		now := s.now()
+		var expires int64
+		detail := "permanent"
+		if duration > 0 {
+			expires = now.Add(duration).Unix()
+			detail = "until " + time.Unix(expires, 0).UTC().Format(time.RFC3339)
+		}
+		if reason != "" {
+			detail += "; " + reason
+		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT OR REPLACE INTO bans (domain_id, user_id, banned_by, reason, banned_at) VALUES (?, ?, ?, ?, ?)`,
-			domainID, targetID, actorID, reason, s.now().Unix()); err != nil {
+			`INSERT OR REPLACE INTO bans (domain_id, user_id, banned_by, reason, banned_at, expires_at, target_rank)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			domainID, targetID, actorID, reason, now.Unix(), expires, t.Rank); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, domainID, actorID, "member.ban", targetID, reason)
+		return s.audit(ctx, tx, domainID, actorID, "member.ban", targetID, detail)
 	})
 }
 
-// Unban lifts a ban. It needs the ban permission; the banned user is not a member, so no rank check applies.
+// Unban lifts a ban early. The actor needs the ban permission and must
+// outrank the banned person's rank at the time of the ban; the owner may
+// lift any ban. Bans whose time is up count as already lifted.
 func (s *Service) Unban(ctx context.Context, domainID, actorID, targetID string) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		a, err := s.actor(ctx, tx, domainID, actorID)
@@ -295,15 +324,136 @@ func (s *Service) Unban(ctx context.Context, domainID, actorID, targetID string)
 		if !a.IsOwner && !a.Perms.Has(perm.Ban) {
 			return ErrForbidden
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM bans WHERE domain_id = ? AND user_id = ?`, domainID, targetID)
+		var rank int
+		var expires int64
+		err = tx.QueryRowContext(ctx, `SELECT target_rank, expires_at FROM bans WHERE domain_id = ? AND user_id = ?`,
+			domainID, targetID).Scan(&rank, &expires)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
+		if expires > 0 && s.now().Unix() >= expires {
+			if err := s.liftExpired(ctx, tx, domainID, targetID); err != nil {
+				return err
+			}
 			return ErrNotFound
+		}
+		if !perm.CanLiftBan(a, rank) {
+			return ErrForbidden
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM bans WHERE domain_id = ? AND user_id = ?`, domainID, targetID); err != nil {
+			return err
 		}
 		return s.audit(ctx, tx, domainID, actorID, "member.unban", targetID, "")
 	})
+}
+
+// Ban is one active ban in a domain.
+type Ban struct {
+	UserID     string
+	Callsign   string
+	BannedBy   string // callsign of who banned them
+	Reason     string
+	BannedAt   int64
+	ExpiresAt  int64 // Unix time; 0 means permanent
+	FormerRank int   // the banned person's rank when banned
+}
+
+// Bans lists a domain's active bans, soonest to expire first and permanent
+// ones last. Only members with the ban permission may see them.
+func (s *Service) Bans(ctx context.Context, domainID, actorID string) ([]Ban, error) {
+	out := []Ban{}
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		a, err := s.actor(ctx, tx, domainID, actorID)
+		if err != nil {
+			return err
+		}
+		if !a.IsOwner && !a.Perms.Has(perm.Ban) {
+			return ErrForbidden
+		}
+		rows, err := tx.QueryContext(ctx,
+			`SELECT b.user_id, u.callsign, COALESCE(bu.callsign, ''), b.reason, b.banned_at, b.expires_at, b.target_rank
+			   FROM bans b JOIN users u ON u.id = b.user_id LEFT JOIN users bu ON bu.id = b.banned_by
+			  WHERE b.domain_id = ? AND (b.expires_at = 0 OR b.expires_at > ?)
+			  ORDER BY b.expires_at = 0, b.expires_at, u.callsign`, domainID, s.now().Unix())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var b Ban
+			if err := rows.Scan(&b.UserID, &b.Callsign, &b.BannedBy, &b.Reason, &b.BannedAt, &b.ExpiresAt, &b.FormerRank); err != nil {
+				return err
+			}
+			out = append(out, b)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// SweepExpiredBans deletes bans whose time is up, records each in its
+// domain's audit log, and returns the domains that had one.
+func (s *Service) SweepExpiredBans(ctx context.Context) ([]string, error) {
+	var domainIDs []string
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx,
+			`SELECT domain_id, user_id FROM bans WHERE expires_at > 0 AND expires_at <= ? ORDER BY domain_id`, s.now().Unix())
+		if err != nil {
+			return err
+		}
+		var expired [][2]string
+		for rows.Next() {
+			var k [2]string
+			if err := rows.Scan(&k[0], &k[1]); err != nil {
+				rows.Close()
+				return err
+			}
+			expired = append(expired, k)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, k := range expired {
+			if err := s.liftExpired(ctx, tx, k[0], k[1]); err != nil {
+				return err
+			}
+			if len(domainIDs) == 0 || domainIDs[len(domainIDs)-1] != k[0] {
+				domainIDs = append(domainIDs, k[0])
+			}
+		}
+		return nil
+	})
+	return domainIDs, err
+}
+
+// activeBan reports whether userID is banned from domainID right now. A ban
+// whose time is up is lifted (and audited) here instead.
+func (s *Service) activeBan(ctx context.Context, tx *sql.Tx, domainID, userID string) (bool, error) {
+	var expires int64
+	err := tx.QueryRowContext(ctx,
+		`SELECT expires_at FROM bans WHERE domain_id = ? AND user_id = ?`, domainID, userID).Scan(&expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if expires == 0 || s.now().Unix() < expires {
+		return true, nil
+	}
+	return false, s.liftExpired(ctx, tx, domainID, userID)
+}
+
+// liftExpired removes a ban whose time is up. The audit entry has no actor.
+func (s *Service) liftExpired(ctx context.Context, tx *sql.Tx, domainID, userID string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM bans WHERE domain_id = ? AND user_id = ?`, domainID, userID); err != nil {
+		return err
+	}
+	return s.audit(ctx, tx, domainID, "", "member.ban_expired", userID, "")
 }
 
 // SetMuted mutes or unmutes targetID in the domain.

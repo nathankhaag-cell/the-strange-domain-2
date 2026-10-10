@@ -224,4 +224,16 @@ CREATE TABLE avatars (
 	version INTEGER NOT NULL
 );
 `,
+	`
+-- Temporary bans. expires_at is a Unix time; 0 means the ban is permanent.
+-- target_rank is the banned person's rank when banned: only someone who
+-- outranks it (or the owner) may lift the ban early. 0 for older bans.
+ALTER TABLE bans ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE bans ADD COLUMN target_rank INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX bans_expires ON bans(expires_at) WHERE expires_at > 0;
+
+-- Wardens may now ban (temporarily or permanently) members ranked below
+-- them. Existing domains get this for their default Warden role (rank 300).
+UPDATE roles SET permissions = permissions | 32 WHERE rank = 300 AND name = 'Warden';
+`,
 }

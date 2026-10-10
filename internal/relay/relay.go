@@ -322,7 +322,9 @@ func (s *Service) Fetch(ctx context.Context, groupID, userID string, afterSeq in
 
 // Delete erases an application message's ciphertext, leaving a tombstone so
 // clients can hide it. Senders may delete their own; in a domain channel,
-// members with the DeleteMessages permission may delete anyone's.
+// members with the DeleteMessages permission may delete messages of members
+// ranked below them (by the sender's current rank), or of senders who are no
+// longer members. Moderator deletes are written to the audit log.
 func (s *Service) Delete(ctx context.Context, groupID string, seq int64, userID string) error {
 	recipients, err := s.access(ctx, groupID, userID, false)
 	if err != nil {
@@ -353,6 +355,17 @@ func (s *Service) Delete(ctx context.Context, groupID string, seq int64, userID 
 	if _, err := s.st.DB.ExecContext(ctx,
 		`UPDATE mls_messages SET data = NULL, deleted = 1 WHERE group_id = ? AND seq = ?`, groupID, seq); err != nil {
 		return err
+	}
+	if sender != userID {
+		// A moderator removed someone else's message: record it in the
+		// domain's audit log. Only who, whose and where; the node never
+		// sees message content.
+		if _, err := s.st.DB.ExecContext(ctx,
+			`INSERT INTO audit_log (domain_id, actor_id, action, target, detail, at)
+			 SELECT domain_id, ?, 'message.delete', ?, ?, ? FROM channels WHERE id = ?`,
+			userID, sender, fmt.Sprintf("channel %s, message %d", groupID, seq), s.now().Unix(), groupID); err != nil {
+			return err
+		}
 	}
 	s.notify.Notify(recipients, Event{Type: "deleted", GroupID: groupID, Seq: seq})
 	return nil

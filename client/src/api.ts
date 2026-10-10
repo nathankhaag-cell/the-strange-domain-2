@@ -92,6 +92,18 @@ export interface DomainDetail {
   members: Member[];
   channels: Channel[];
 }
+/** An active ban (GET /domains/{id}/bans, node feature "bans"). */
+export interface Ban {
+  user_id: string;
+  callsign: string;
+  banned_by: string;
+  reason: string;
+  banned_at: number;
+  /** Unix seconds; 0 means permanent. */
+  expires_at: number;
+  /** The banned person's rank when banned; only higher ranks may lift it. */
+  former_rank: number;
+}
 export interface Device {
   id: string;
   name: string;
@@ -208,8 +220,15 @@ export const api = {
   mute: (id: string, uid: string, on: boolean) =>
     call<void>("POST", `/domains/${id}/members/${uid}/${on ? "mute" : "unmute"}`),
   kick: (id: string, uid: string) => call<void>("POST", `/domains/${id}/members/${uid}/kick`),
-  ban: (id: string, uid: string, reason: string) =>
-    call<void>("POST", `/domains/${id}/members/${uid}/ban`, { reason }),
+  /** seconds: 0 bans permanently; undefined sends no duration (nodes without "bans"). */
+  ban: (id: string, uid: string, reason: string, seconds?: number) =>
+    call<void>(
+      "POST",
+      `/domains/${id}/members/${uid}/ban`,
+      seconds === undefined ? { reason } : { reason, duration_seconds: seconds },
+    ),
+  bans: (id: string) => call<Ban[]>("GET", `/domains/${id}/bans`),
+  unban: (id: string, uid: string) => call<void>("DELETE", `/domains/${id}/bans/${uid}`),
 
   devices: () => call<Device[]>("GET", "/devices"),
   linkCode: () => call<{ code: string; expires_in_seconds: number }>("POST", "/devices/link-code"),

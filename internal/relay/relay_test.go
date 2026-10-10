@@ -142,6 +142,87 @@ func TestDeleteRules(t *testing.T) {
 	}
 }
 
+func TestModeratorDeleteByRank(t *testing.T) {
+	f := setup(t)
+	roles, _ := f.dom.Roles(f.ctx, f.domain.ID)
+	roleID := map[string]string{}
+	for _, r := range roles {
+		roleID[r.Name] = r.ID
+	}
+	inv, _ := f.dom.CreateInvite(f.ctx, f.domain.ID, f.abbot.ID, 0, 0)
+	join := func(name, role string) (domains.User, string) {
+		u, _ := f.dom.CreateUser(f.ctx, name)
+		dev := store.NewID()
+		f.st.DB.Exec(`INSERT INTO devices (id, user_id, name, identity_pk, created_at) VALUES (?, ?, 'x', ?, 0)`, dev, u.ID, []byte(dev))
+		if _, err := f.dom.JoinByInvite(f.ctx, inv, u.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.dom.AssignRole(f.ctx, f.domain.ID, f.abbot.ID, u.ID, roleID[role]); err != nil {
+			t.Fatal(err)
+		}
+		return u, dev
+	}
+	bishop, devBishop := join("bishop", "Bishop")
+	warden, devWarden := join("warden", "Warden")
+	warden2, devWarden2 := join("warden2", "Warden")
+	send := func(u domains.User, dev, text string) int64 {
+		m, err := f.rl.Send(f.ctx, f.chapel, u.ID, dev, KindApplication, 0, []byte(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m.Seq
+	}
+	// A Warden deletes a member's message; it is audited without content.
+	seq := send(f.brother, f.devBrother, "brother says")
+	if err := f.rl.Delete(f.ctx, f.chapel, seq, warden.ID); err != nil {
+		t.Fatalf("warden deletes member: %v", err)
+	}
+	var actor, action, target, detail string
+	if err := f.st.DB.QueryRow(`SELECT actor_id, action, target, detail FROM audit_log WHERE domain_id = ? ORDER BY id DESC LIMIT 1`,
+		f.domain.ID).Scan(&actor, &action, &target, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if actor != warden.ID || action != "message.delete" || target != f.brother.ID || detail == "" {
+		t.Fatalf("audit = %q %q %q %q", actor, action, target, detail)
+	}
+	// Every member is told, so all clients show it as removed.
+	for _, u := range []string{f.abbot.ID, f.brother.ID, bishop.ID, warden2.ID} {
+		evs := f.rec.events[u]
+		if len(evs) == 0 || evs[len(evs)-1].Type != "deleted" || evs[len(evs)-1].Seq != seq {
+			t.Fatalf("user %s not told about the delete: %+v", u, evs)
+		}
+	}
+	// A Warden cannot delete an equal or higher rank's message.
+	for name, s := range map[string]int64{
+		"warden2": send(warden2, devWarden2, "w2"),
+		"bishop":  send(bishop, devBishop, "b"),
+		"abbot":   send(f.abbot, f.devAbbot, "a"),
+	} {
+		if err := f.rl.Delete(f.ctx, f.chapel, s, warden.ID); !errors.Is(err, domains.ErrForbidden) {
+			t.Fatalf("warden deletes %s: got %v, want ErrForbidden", name, err)
+		}
+	}
+	// A Bishop can delete a Warden's message; the Warden can delete their own.
+	if err := f.rl.Delete(f.ctx, f.chapel, send(warden2, devWarden2, "w2 again"), bishop.ID); err != nil {
+		t.Fatalf("bishop deletes warden: %v", err)
+	}
+	if err := f.rl.Delete(f.ctx, f.chapel, send(warden, devWarden, "mine"), warden.ID); err != nil {
+		t.Fatalf("warden deletes own: %v", err)
+	}
+	// Rank is checked at delete time: once demoted, a former Warden's message is fair game.
+	s := send(warden2, devWarden2, "before demotion")
+	if err := f.dom.AssignRole(f.ctx, f.domain.ID, f.abbot.ID, warden2.ID, roleID["Brother / Sister"]); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.rl.Delete(f.ctx, f.chapel, s, warden.ID); err != nil {
+		t.Fatalf("warden deletes demoted member: %v", err)
+	}
+	// Members cannot delete others' messages.
+	if err := f.rl.Delete(f.ctx, f.chapel, send(warden2, devWarden2, "x"), f.brother.ID); !errors.Is(err, domains.ErrForbidden) {
+		t.Fatalf("member deletes member: got %v, want ErrForbidden", err)
+	}
+}
+
 func TestConclaveAndKeyPackages(t *testing.T) {
 	f := setup(t)
 	if _, err := f.rl.CreateConclave(f.ctx, f.abbot.ID, []string{f.outsider.ID}); !errors.Is(err, domains.ErrForbidden) {

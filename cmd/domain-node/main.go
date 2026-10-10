@@ -225,6 +225,7 @@ func run(ctx context.Context, o options, ready func(httpAddr, httpsAddr net.Addr
 	if o.statusInterval > 0 {
 		go statusLoop(bg, handler, o.statusInterval)
 	}
+	go handler.RunBanSweep(bg, time.Minute)
 
 	var runErr error
 	select {

@@ -11,11 +11,12 @@ package server
 //     The node never refuses older clients itself; clients use this only to
 //     tell the person to update.
 const (
-	APILevel     = 3
+	APILevel     = 4
 	MinClientAPI = 1
 )
 
 // Features are the optional capabilities every node of this version has.
 // "calls" (level 3: /api/v1/calls and /api/v1/rtc) and "video" are added
-// when they are turned on (see Server.features).
-var Features = []string{"attachments", "avatars"}
+// when they are turned on (see Server.features). "bans" (level 4) is
+// temporary bans (duration_seconds) and GET /api/v1/domains/{id}/bans.
+var Features = []string{"attachments", "avatars", "bans"}
