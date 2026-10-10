@@ -15,9 +15,9 @@
 import type { Info } from "./api";
 
 /** This client's API level (matches APILevel in compat.go when built together). */
-export const CLIENT_API = 3;
+export const CLIENT_API = 4;
 
-export type Feature = "attachments" | "avatars" | "calls" | "video";
+export type Feature = "attachments" | "avatars" | "calls" | "video" | "bans";
 
 /** Features this client uses; a node without one of them is "too old". */
 const WANTED: Feature[] = ["attachments", "avatars"];

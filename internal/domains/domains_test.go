@@ -86,31 +86,36 @@ func TestModeratorRules(t *testing.T) {
 	if err := f.svc.Kick(f.ctx, f.domain.ID, f.mod.ID, f.alice.ID); err != nil {
 		t.Fatalf("mod kick member: %v", err)
 	}
-	// A moderator lacks the ban permission by default.
-	if err := f.svc.Ban(f.ctx, f.domain.ID, f.mod.ID, f.bob.ID, ""); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("mod ban: got %v, want ErrForbidden", err)
+	// A moderator can ban a member.
+	if err := f.svc.Ban(f.ctx, f.domain.ID, f.mod.ID, f.bob.ID, "", time.Hour); err != nil {
+		t.Fatalf("mod ban member: %v", err)
 	}
 	// Nobody can act on the owner.
 	if err := f.svc.Kick(f.ctx, f.domain.ID, f.mod.ID, f.owner.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("kick owner: got %v, want ErrForbidden", err)
 	}
 	// A member cannot moderate.
-	if err := f.svc.SetMuted(f.ctx, f.domain.ID, f.bob.ID, f.mod.ID, true); !errors.Is(err, ErrForbidden) {
+	carol, _ := f.svc.CreateUser(f.ctx, "carol")
+	inv, _ := f.svc.CreateInvite(f.ctx, f.domain.ID, f.owner.ID, 0, 0)
+	if _, err := f.svc.JoinByInvite(f.ctx, inv, carol.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.SetMuted(f.ctx, f.domain.ID, carol.ID, f.mod.ID, true); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("member mute mod: got %v, want ErrForbidden", err)
 	}
 	// A moderator cannot promote someone to its own rank or above.
-	if err := f.svc.AssignRole(f.ctx, f.domain.ID, f.mod.ID, f.bob.ID, f.roles["Warden"].ID); !errors.Is(err, ErrForbidden) {
+	if err := f.svc.AssignRole(f.ctx, f.domain.ID, f.mod.ID, carol.ID, f.roles["Warden"].ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("mod promote to mod: got %v, want ErrForbidden", err)
 	}
 	// Nobody can hand out the owner role.
-	if err := f.svc.AssignRole(f.ctx, f.domain.ID, f.owner.ID, f.bob.ID, f.roles["Abbot"].ID); !errors.Is(err, ErrForbidden) {
+	if err := f.svc.AssignRole(f.ctx, f.domain.ID, f.owner.ID, carol.ID, f.roles["Abbot"].ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("grant owner role: got %v, want ErrForbidden", err)
 	}
 }
 
 func TestBanBlocksRejoin(t *testing.T) {
 	f := setup(t)
-	if err := f.svc.Ban(f.ctx, f.domain.ID, f.owner.ID, f.bob.ID, "spam"); err != nil {
+	if err := f.svc.Ban(f.ctx, f.domain.ID, f.owner.ID, f.bob.ID, "spam", 0); err != nil {
 		t.Fatal(err)
 	}
 	inv, err := f.svc.CreateInvite(f.ctx, f.domain.ID, f.owner.ID, 0, 0)

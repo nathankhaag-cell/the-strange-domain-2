@@ -41,6 +41,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/v1/domains/{id}/members/{uid}/unmute", s.authed(s.mute(false)))
 	s.mux.Handle("POST /api/v1/domains/{id}/members/{uid}/kick", s.authed(s.kick))
 	s.mux.Handle("POST /api/v1/domains/{id}/members/{uid}/ban", s.authed(s.ban))
+	s.mux.Handle("GET /api/v1/domains/{id}/bans", s.authed(s.listBans))
 	s.mux.Handle("DELETE /api/v1/domains/{id}/bans/{uid}", s.authed(s.unban))
 }
 
@@ -328,11 +329,68 @@ func (s *Server) kick(w http.ResponseWriter, r *http.Request, a auth.Account) {
 func (s *Server) ban(w http.ResponseWriter, r *http.Request, a auth.Account) {
 	var req struct {
 		Reason string `json:"reason"`
+		// DurationSeconds 0 (or absent) bans permanently.
+		DurationSeconds int64 `json:"duration_seconds"`
 	}
 	if r.ContentLength != 0 && !readJSON(w, r, &req) {
 		return
 	}
-	s.domainDone(w, r, s.dom.Ban(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), req.Reason), r.PathValue("uid"))
+	if req.DurationSeconds < 0 || req.DurationSeconds > maxBanSeconds {
+		writeErr(w, domains.ErrInvalidInput)
+		return
+	}
+	err := s.dom.Ban(r.Context(), r.PathValue("id"), a.UserID, r.PathValue("uid"), req.Reason,
+		time.Duration(req.DurationSeconds)*time.Second)
+	s.domainDone(w, r, err, r.PathValue("uid"))
+}
+
+// maxBanSeconds caps a temporary ban at ten years; use 0 for permanent.
+const maxBanSeconds = 10 * 365 * 24 * 3600
+
+func (s *Server) listBans(w http.ResponseWriter, r *http.Request, a auth.Account) {
+	bans, err := s.dom.Bans(r.Context(), r.PathValue("id"), a.UserID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	type banJSON struct {
+		UserID     string `json:"user_id"`
+		Callsign   string `json:"callsign"`
+		BannedBy   string `json:"banned_by"`
+		Reason     string `json:"reason"`
+		BannedAt   int64  `json:"banned_at"`
+		ExpiresAt  int64  `json:"expires_at"` // 0: permanent
+		FormerRank int    `json:"former_rank"`
+	}
+	out := make([]banJSON, 0, len(bans))
+	for _, b := range bans {
+		out = append(out, banJSON{b.UserID, b.Callsign, b.BannedBy, b.Reason, b.BannedAt, b.ExpiresAt, b.FormerRank})
+	}
+	writeJSON(w, out)
+}
+
+// SweepBans lifts bans whose time is up and tells those domains' members.
+// Joining checks expiry too, so this only keeps ban lists and the audit log current.
+func (s *Server) SweepBans(ctx context.Context) error {
+	ids, err := s.dom.SweepExpiredBans(ctx)
+	for _, id := range ids {
+		s.notifyDomain(ctx, id)
+	}
+	return err
+}
+
+// RunBanSweep calls SweepBans every interval until ctx is done.
+func (s *Server) RunBanSweep(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			_ = s.SweepBans(ctx)
+		}
+	}
 }
 
 func (s *Server) unban(w http.ResponseWriter, r *http.Request, a auth.Account) {

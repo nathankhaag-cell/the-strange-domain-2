@@ -62,3 +62,13 @@ func CanGrantRank(a Actor, roleRank int) bool {
 	}
 	return a.Perms.Has(ManageRoles) && roleRank < a.Rank
 }
+
+// CanLiftBan reports whether the actor may lift a ban early. The actor needs
+// the ban permission and must outrank the banned person's rank at the time
+// of the ban; the owner may lift any ban.
+func CanLiftBan(a Actor, bannedRank int) bool {
+	if a.IsOwner {
+		return true
+	}
+	return a.Perms.Has(Ban) && a.Rank > bannedRank
+}

@@ -174,6 +174,10 @@ Files people send (pictures, PDFs and so on) are encrypted on their device; the 
 
 On a Raspberry Pi with a small SD card, lower both, for example `-max-upload-mb 10 -upload-quota-mb 200`. Deleting a message deletes its files; uploads that never got sent are removed after an hour.
 
+## Roles and moderation
+
+Each domain's Abbot can appoint Bishops and Wardens; Bishops can appoint Wardens. Wardens and above can mute, kick, ban (for 1 hour, 24 hours, 7 days, 30 days or permanently) and delete messages of people ranked below them. Open a person in the member list to see the actions you are allowed to take; Wardens and above also get a BANS button with the time left on each ban and Unban. Timed bans end by themselves; the node checks when someone tries to rejoin and also clears ended bans every minute. See the table in the [README](../README.md#the-strange-domain).
+
 ## Voice and video calls
 
 People can talk in a domain's **Voice Relays** (Join, Leave, Mute, push to talk, Camera, Share screen) and call each other in **Confessions** and **Conclaves** (Call or Video call; the others hear a ringing sound and see Answer and Decline).
