@@ -12,7 +12,7 @@
 // SHA-256 fingerprint the person confirmed, and only for that node.
 "use strict";
 
-const { app, BrowserWindow, Menu, desktopCapturer, dialog, ipcMain, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, desktopCapturer, dialog, globalShortcut, ipcMain, screen, session, shell } = require("electron");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -21,6 +21,8 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { normalize, needsSecureSwitch } = require("./address");
 const { scheduleUpdateCheck } = require("./updates");
+const windowState = require("./window-state");
+const { isSafeAccelerator } = require("./accelerator");
 
 const CONNECT_PAGE = path.join(__dirname, "connect.html");
 const CONNECT_URL = pathToFileURL(CONNECT_PAGE).href;
@@ -140,12 +142,34 @@ function showNode() {
   void win.loadURL(current.url + "/");
 }
 
+function windowStatePath() {
+  return path.join(app.getPath("userData"), "window.json");
+}
+
+/** Tells the page whether the window is maximized, full screen, focused. */
+function windowStateOf(w) {
+  return { maximized: w.isMaximized(), fullscreen: w.isFullScreen(), focused: w.isFocused() };
+}
+
 function createWindow() {
+  const isMac = process.platform === "darwin";
+  const saved = windowState.restore(
+    windowState.load(windowStatePath()),
+    screen.getAllDisplays().map((d) => d.workArea),
+  );
   win = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 360,
-    minHeight: 480,
+    x: saved.x,
+    y: saved.y,
+    width: saved.width,
+    height: saved.height,
+    minWidth: windowState.MIN.width,
+    minHeight: windowState.MIN.height,
+    // No system title bar: the page draws its own (see preload.js). macOS
+    // keeps its traffic lights, placed inside that bar.
+    frame: isMac,
+    titleBarStyle: isMac ? "hidden" : undefined,
+    trafficLightPosition: isMac ? { x: 12, y: 10 } : undefined,
+    show: false,
     backgroundColor: "#050505",
     title: "The Strange Domain",
     icon: path.join(__dirname, "..", "build", "icon.png"),
@@ -158,7 +182,71 @@ function createWindow() {
     },
   });
 
+  // Remember size, position, maximized and full screen. The normal bounds
+  // and the maximized flag are tracked here: while full screen (or
+  // maximized, on some Linux window managers) getNormalBounds() reports
+  // the full-screen size instead.
+  let normal = win.getNormalBounds();
+  let maximized = saved.maximized;
+  let saveTimer = null;
+  const track = () => {
+    if (!win || win.isDestroyed() || win.isFullScreen() || win.isMinimized()) return;
+    maximized = win.isMaximized();
+    if (!maximized) normal = win.getBounds();
+  };
+  const remember = () => {
+    if (!win || win.isDestroyed()) return;
+    windowState.save(windowStatePath(), windowState.snapshot(normal, maximized, win.isFullScreen()));
+  };
+  const rememberSoon = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(remember, 400);
+  };
+  const sendState = () => {
+    if (win && !win.isDestroyed()) win.webContents.send("window:state", windowStateOf(win));
+  };
+  for (const ev of ["resize", "move"]) {
+    win.on(ev, () => {
+      track();
+      rememberSoon();
+    });
+  }
+  for (const ev of ["maximize", "unmaximize", "enter-full-screen", "leave-full-screen"]) {
+    win.on(ev, () => {
+      track();
+      sendState();
+      rememberSoon();
+    });
+  }
+  if (saved.maximized) win.maximize();
+  if (saved.fullscreen) win.setFullScreen(true);
+  win.once("ready-to-show", () => win && win.show());
+  // Shown anyway if the page is slow, so the window never stays invisible.
+  setTimeout(() => win && !win.isDestroyed() && !win.isVisible() && win.show(), 3000);
+  win.on("focus", sendState);
+  win.on("blur", sendState);
+  win.on("close", () => {
+    clearTimeout(saveTimer);
+    remember();
+  });
+  win.on("closed", () => {
+    win = null;
+  });
+
   const wc = win.webContents;
+  // F11 toggles full screen everywhere (the menu bar is hidden, so its own
+  // shortcut cannot be relied on). On macOS the system's Ctrl+Cmd+F and the
+  // green button also work.
+  wc.on("before-input-event", (e, input) => {
+    if (input.type === "keyDown" && input.key === "F11" && !input.control && !input.alt && !input.meta && !input.shift) {
+      e.preventDefault();
+      if (win) win.setFullScreen(!win.isFullScreen());
+    }
+  });
+  // A new page asks for its background shortcut again.
+  wc.on("did-start-navigation", (details) => {
+    if (details.isMainFrame && !details.isSameDocument) clearGlobalMute();
+  });
   // Only the connect page and the chosen node may load in the window.
   // Anything else (a link in a message) opens in the system browser.
   wc.on("will-navigate", (e, url) => {
@@ -181,6 +269,70 @@ function createWindow() {
   if (current) showNode();
   else showConnect();
 }
+
+// ---- window controls and the background mute shortcut ----
+//
+// The connect page and the chosen node's pages draw the title bar, so both
+// may minimize, maximize, close and full-screen the window and open the app
+// menu, and may set the one background shortcut (Toggle mute, checked in
+// accelerator.js). Nothing else is reachable from a page.
+
+function fromWindowPage(event) {
+  if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) return false;
+  const url = event.senderFrame?.url;
+  return isConnectPage(url) || onNode(url);
+}
+
+ipcMain.on("window:minimize", (event) => {
+  if (fromWindowPage(event)) win.minimize();
+});
+ipcMain.on("window:maximize", (event) => {
+  if (!fromWindowPage(event)) return;
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+});
+ipcMain.on("window:close", (event) => {
+  if (fromWindowPage(event)) win.close();
+});
+ipcMain.on("window:fullscreen", (event, on) => {
+  if (!fromWindowPage(event)) return;
+  win.setFullScreen(typeof on === "boolean" ? on : !win.isFullScreen());
+});
+ipcMain.handle("window:state", (event) => (fromWindowPage(event) ? windowStateOf(win) : null));
+ipcMain.on("window:menu", (event, x, y) => {
+  if (!fromWindowPage(event)) return;
+  const menu = Menu.getApplicationMenu();
+  if (!menu) return;
+  const opts = { window: win };
+  if (Number.isFinite(x) && Number.isFinite(y)) Object.assign(opts, { x: Math.round(x), y: Math.round(y) });
+  menu.popup(opts);
+});
+
+let globalMute = null;
+
+function clearGlobalMute() {
+  if (globalMute) {
+    globalShortcut.unregister(globalMute);
+    globalMute = null;
+  }
+}
+
+ipcMain.handle("keys:global-mute", (event, acc) => {
+  if (!fromWindowPage(event)) return false;
+  clearGlobalMute();
+  if (acc === null || acc === undefined || acc === "") return true;
+  if (!isSafeAccelerator(acc)) return false;
+  let ok = false;
+  try {
+    ok = globalShortcut.register(acc, () => {
+      if (win && !win.isDestroyed()) win.webContents.send("keys:global-mute");
+    });
+  } catch {
+    ok = false;
+  }
+  if (ok) globalMute = acc;
+  return ok;
+});
 
 // ---- connect page IPC ----
 
@@ -348,4 +500,5 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on("window-all-closed", () => app.quit());
+  app.on("will-quit", () => globalShortcut.unregisterAll());
 }

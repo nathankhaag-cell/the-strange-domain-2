@@ -171,3 +171,93 @@ button.secondary {
 [hidden] {
   display: none !important;
 }
+
+/* ---- title bar (the window has no system frame; titlebar.js) ----
+   Same look as the client's (client/src/styles.css). */
+:root {
+  --fg-faint: #1f6b35;
+  --tb-h: 32px;
+}
+html.has-titlebar body {
+  padding-top: calc(var(--tb-h) + 24px);
+}
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: var(--tb-h);
+  display: flex;
+  align-items: stretch;
+  background: #070707;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-dim);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+.titlebar[data-platform="darwin"] {
+  padding-left: 78px; /* the traffic lights */
+}
+.tb-fill {
+  flex: 1 1 auto;
+}
+.tb-btn {
+  -webkit-app-region: no-drag;
+  width: 46px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  text-transform: none;
+}
+.tb-btn:hover:not(:disabled) {
+  background: rgba(0, 255, 65, 0.1);
+  color: var(--fg);
+}
+.tb-btn.tb-close:hover:not(:disabled) {
+  background: var(--danger);
+  color: #000;
+}
+.tb-btn:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
+}
+
+/* ---- scroll bars: thin, square, dark track, green thumb ---- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: var(--bg);
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fg-faint);
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-dim);
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--fg);
+}
+::-webkit-scrollbar-corner {
+  background: var(--bg);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--fg-faint) var(--bg);
+  }
+}

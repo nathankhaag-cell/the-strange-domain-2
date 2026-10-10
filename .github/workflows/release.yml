@@ -254,10 +254,40 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      # Download only this workflow's own release files. Without a pattern,
+      # download-artifact also fetches the CI checks' domain-node-* artifacts
+      # (the "checks" job above runs ci.yml in this same run), whose raw
+      # domain-node and domain-node.exe binaries then landed in the release.
       - uses: actions/download-artifact@v4
         with:
+          pattern: node-*
           path: release
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: android
+          path: release
+      # Refuse anything that is not an archive, installer, APK, blockmap or
+      # update metadata, so a stray file cannot reach the release again.
+      - name: Check release files
+        working-directory: release
+        run: |
+          bad=0
+          for f in *; do
+            case "$f" in
+              domain-node-*.tar.gz|domain-node-*.zip) ;;
+              The-Strange-Domain-*.exe|The-Strange-Domain-*.dmg|The-Strange-Domain-*.AppImage) ;;
+              The-Strange-Domain-*.deb|The-Strange-Domain-*.apk|The-Strange-Domain-*.blockmap|latest*.yml) ;;
+              *) echo "::error::Unexpected release file: $f"; bad=1 ;;
+            esac
+          done
+          ls -l
+          exit "$bad"
       - name: Checksums
         working-directory: release
         run: |
