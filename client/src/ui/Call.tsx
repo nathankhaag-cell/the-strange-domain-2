@@ -23,8 +23,10 @@ import {
 } from "../app";
 import { e2eeSupport, NO_E2EE, type CallView } from "../call/session";
 import { has as nodeHas } from "../compat";
+import { comboLabel, useBindings } from "../hotkeys";
 import { MenuIcon, Speaker } from "./icons";
 import { errText } from "./common";
+import { ZoomView } from "./ZoomView";
 
 const canShareScreen = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
 
@@ -185,13 +187,28 @@ function CallStage({ app, view }: { app: AppState; view: CallView }) {
   const parts = view.participants.length
     ? view.participants
     : [{ id: view.selfId ?? "self", user_id: app.me?.user_id ?? "", device_id: "", muted: view.muted, camera: false, screen: false, can_speak: view.canSpeak, joined: 0 }];
+  // The large view of someone's screen or camera (by participant id).
+  const [zoom, setZoom] = useState<string | null>(null);
+  const zp = zoom ? parts.find((p) => p.id === zoom && p.id !== view.selfId) : undefined;
+  const zm = zp ? view.remote[zp.id] : undefined;
+  const zScreen = zp?.screen ? zm?.screen : undefined;
+  const zSource = zScreen ?? (zp?.camera ? zm?.camera : undefined);
+  const zName = zp ? callsignOf(zp.user_id).toUpperCase() : "";
   return (
     <div class="call-stage" data-phase={view.phase}>
       <div class="call-tiles">
         {parts.map((p) => (
-          <Tile app={app} view={view} part={p} />
+          <Tile app={app} view={view} part={p} onOpen={() => setZoom(p.id)} />
         ))}
       </div>
+      {zp && zSource && (
+        <ZoomView
+          key={`${zp.id}:${zScreen ? "screen" : "camera"}`}
+          source={zSource}
+          title={`${zName} • ${zScreen ? "Shared screen" : "Camera"}`}
+          onClose={() => setZoom(null)}
+        />
+      )}
       <div class="call-status muted small" role="status">
         {view.phase === "connecting"
           ? "Connecting…"
@@ -205,7 +222,7 @@ function CallStage({ app, view }: { app: AppState; view: CallView }) {
   );
 }
 
-function Tile({ app, view, part }: { app: AppState; view: CallView; part: CallPart }) {
+function Tile({ app, view, part, onOpen }: { app: AppState; view: CallView; part: CallPart; onOpen: () => void }) {
   const self = part.id === view.selfId;
   const media = self ? undefined : view.remote[part.id];
   const screen = self ? (view.screen ? view.localScreen : undefined) : part.screen ? media?.screen : undefined;
@@ -224,6 +241,7 @@ function Tile({ app, view, part }: { app: AppState; view: CallView; part: CallPa
           {name.slice(0, 1).toUpperCase()}
         </div>
       )}
+      {!self && (screen || camera) && <button type="button" class="call-tile-open" aria-label="Enlarge" title="Enlarge" onClick={onOpen} />}
       <div class="call-tile-name">
         <span>{name.toUpperCase()}</span>
         {self && <span class="muted small">(you)</span>}
@@ -258,8 +276,10 @@ function CallControls({ view }: { view: CallView }) {
   };
 
   // Push to talk: hold the space bar (outside text fields) or the button.
+  // A push-to-talk key set in Settings replaces the space bar (hotkeys.ts).
+  const keys = useBindings();
   useEffect(() => {
-    if (!view.ptt) return;
+    if (!view.ptt || keys.ptt) return;
     const typing = (t: EventTarget | null) =>
       t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(t.tagName));
     const down = (e: KeyboardEvent) => {
@@ -280,12 +300,12 @@ function CallControls({ view }: { view: CallView }) {
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
-  }, [view.ptt]);
+  }, [view.ptt, keys.ptt]);
 
   let note = "";
   if (!view.canSpeak) note = "You are muted in this domain. You can listen.";
   else if (!view.micOk && view.phase === "live") note = "No microphone. You can listen.";
-  else if (view.ptt) note = "Hold the space bar or the button to talk.";
+  else if (view.ptt) note = keys.ptt ? `Hold ${comboLabel(keys.ptt)} or the button to talk.` : "Hold the space bar or the button to talk.";
 
   const speakOk = view.canSpeak && view.micOk;
   return (

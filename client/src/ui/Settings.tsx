@@ -1,7 +1,7 @@
-// Settings: profile picture, notifications, and (for phones, where the top
-// bar is hidden) effects and sign out.
+// Settings: profile picture, notifications, keyboard shortcuts for calls,
+// and (for phones, where the top bar is hidden) effects and sign out.
 
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import {
   enableNotifications,
   removeAvatar,
@@ -12,7 +12,18 @@ import {
   useApp,
 } from "../app";
 import { has as nodeHas } from "../compat";
+import { desktop } from "../desktop";
 import { renderAvatar } from "../files";
+import {
+  comboLabel,
+  comboOf,
+  globalStatus,
+  setBackgroundMute,
+  setBinding,
+  setCapturing,
+  useBindings,
+  type Action,
+} from "../hotkeys";
 import { permission, type Permission } from "../notify";
 import { Modal, errText } from "./common";
 import { Avatar } from "./Media";
@@ -87,6 +98,8 @@ export function SettingsModal({ onClose, onNodeAdmin }: { onClose: () => void; o
         {err && <div class="error">{err}</div>}
       </div>
 
+      <KeyBindings />
+
       <div class="modal-form settings-device">
         <h3>This device</h3>
         <div class="row-wrap">
@@ -104,6 +117,105 @@ export function SettingsModal({ onClose, onNodeAdmin }: { onClose: () => void; o
         </div>
       </div>
     </Modal>
+  );
+}
+
+const ACTIONS: { id: Action; label: string }[] = [
+  { id: "mute", label: "Toggle mute" },
+  { id: "ptt", label: "Push to talk" },
+];
+
+/** Keyboard shortcuts for calls (hotkeys.ts), saved on this device. */
+function KeyBindings() {
+  const keys = useBindings();
+  const [waiting, setWaiting] = useState<Action | null>(null);
+  const [err, setErr] = useState("");
+  const d = desktop();
+  const g = globalStatus();
+
+  // While waiting, the next key press (with any modifiers) becomes the
+  // binding. Esc cancels. Nothing else on the page sees that key press.
+  // (A layout effect, so the listener is in place before the next key.)
+  useLayoutEffect(() => {
+    if (!waiting) return;
+    setCapturing(true);
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === "Escape" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+        setWaiting(null);
+        return;
+      }
+      const combo = comboOf(e);
+      if (!combo) return; // a modifier on its own: wait for the key
+      const other = ACTIONS.find((a) => a.id !== waiting && keys[a.id] === combo);
+      if (other) {
+        setErr(`${comboLabel(combo)} is already used for ${other.label}.`);
+        return;
+      }
+      setErr("");
+      setBinding(waiting, combo);
+      setWaiting(null);
+    };
+    const cancel = () => setWaiting(null);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", cancel);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", cancel);
+      setCapturing(false);
+    };
+  }, [waiting]);
+
+  return (
+    <div class="modal-form keybinds">
+      <h3>Keyboard shortcuts</h3>
+      <p class="muted small">For calls. They work while this window is in front, and are saved on this device.</p>
+      {ACTIONS.map((a) => (
+        <div class="keybind" data-action={a.id}>
+          <span class="keybind-name">{a.label}</span>
+          <span class={keys[a.id] && waiting !== a.id ? "keybind-key" : "keybind-key muted"} aria-live="polite">
+            {waiting === a.id ? "Press a key… (Esc to cancel)" : keys[a.id] ? comboLabel(keys[a.id]) : "Not set"}
+          </span>
+          <button
+            type="button"
+            class="btn-small"
+            aria-pressed={waiting === a.id}
+            onClick={() => {
+              setErr("");
+              setWaiting(waiting === a.id ? null : a.id);
+            }}
+          >
+            Set
+          </button>
+          <button type="button" class="btn-small" disabled={!keys[a.id]} onClick={() => setBinding(a.id, undefined)}>
+            Clear
+          </button>
+        </div>
+      ))}
+      <p class="muted small">
+        Push to talk works when Push to talk is on in the call. Without a key set here, hold the space bar in the call.
+      </p>
+      {d && (
+        <>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={!!keys.bgMute}
+              disabled={!keys.mute}
+              onChange={(e) => setBackgroundMute((e.target as HTMLInputElement).checked)}
+            />
+            Toggle mute works when the app is in the background
+          </label>
+          <p class="muted small">
+            Only Toggle mute can work in the background: the system tells the app when a shortcut is pressed, but not when it is let go,
+            which push to talk needs.
+          </p>
+          {keys.bgMute && g.error && <div class="error">{g.error}</div>}
+        </>
+      )}
+      {err && <div class="error">{err}</div>}
+    </div>
   );
 }
 

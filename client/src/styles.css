@@ -1621,3 +1621,216 @@ input[type="radio"] {
     padding: 8px 12px;
   }
 }
+
+/* ---- large view of a shared screen or camera, with zoom (ZoomView) ---- */
+
+.call-tile-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: zoom-in;
+}
+.call-tile-open:focus-visible {
+  outline-offset: -2px;
+}
+.call-tile-name {
+  z-index: 2;
+}
+.zoom-view {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  flex-direction: column;
+}
+.zoom-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #070707;
+}
+.zoom-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: 1px;
+}
+.zoom-pct {
+  min-width: 4ch;
+  text-align: center;
+  color: var(--fg-dim);
+  font-size: 17px;
+}
+.zoom-port {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.zoom-port.zoomed {
+  cursor: grab;
+}
+.zoom-port.zoomed:active {
+  cursor: grabbing;
+}
+.zoom-video {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: none;
+  transform-origin: center;
+  background: #000;
+  pointer-events: none;
+}
+
+/* ---- keyboard shortcuts (Settings) ---- */
+
+.keybind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.keybind-name {
+  flex: 0 0 6.5em;
+}
+.keybind-key {
+  flex: 1 1 6em;
+  min-width: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  letter-spacing: 1px;
+}
+
+/* ---- desktop app title bar (TitleBar; the window has no system frame) ---- */
+
+:root {
+  --tb-h: 32px;
+}
+html.has-titlebar #app {
+  display: flex;
+  flex-direction: column;
+}
+html.has-titlebar .crt {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  /* Fixed overlays (dialogs, drawers, the large call view) stay below the
+     title bar so the window controls are always reachable. */
+  contain: layout;
+}
+.titlebar {
+  flex: 0 0 var(--tb-h);
+  height: var(--tb-h);
+  display: flex;
+  align-items: stretch;
+  background: #070707;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg-dim);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+.titlebar[data-platform="darwin"] {
+  padding-left: 78px; /* the traffic lights */
+}
+.tb-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 18px;
+  letter-spacing: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tb-badge {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fg);
+  color: #000;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+.titlebar.blurred .tb-title {
+  color: var(--fg-faint);
+}
+.titlebar.blurred .tb-badge {
+  background: var(--fg-faint);
+}
+.tb-fill {
+  flex: 1 1 auto;
+}
+.tb-btn {
+  -webkit-app-region: no-drag;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.tb-btn:hover {
+  background: rgba(0, 255, 65, 0.1);
+  color: var(--fg);
+}
+.tb-btn.tb-close:hover {
+  background: var(--danger);
+  color: #000;
+}
+.tb-btn:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ---- scroll bars: thin, square, dark track, green thumb ----
+   Chromium and Safari use the ::-webkit-scrollbar rules (setting the
+   standard properties there would switch them off); Firefox uses
+   scrollbar-width and scrollbar-color. */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: var(--bg-deep);
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-deep);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fg-faint);
+  border: 2px solid var(--bg-deep);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-dim);
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--fg);
+}
+::-webkit-scrollbar-corner {
+  background: var(--bg-deep);
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--fg-faint) var(--bg-deep);
+  }
+}

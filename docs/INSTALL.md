@@ -79,7 +79,7 @@ You only need to do this once.
 
 The first time you open the desktop or Android app, it asks for the **node address**. Type the address of the computer running the Domain Node, for example `192.168.1.20:8743`. If you leave out the port, 8743 is used. Then sign in as usual.
 
-- **Desktop app:** to switch to another node later, use **File > Change node**.
+- **Desktop app:** to switch to another node later, use **File > Change node** (the menu button at the left of the app's title bar on Windows and Linux; the menu bar on a Mac). F11 or the full-screen button in the title bar switches full screen on and off.
 - **Android app:** sign out, then tap **Change node** on the sign-in screen. Each node keeps its own keys and messages in the app.
 
 To find the node computer's address: on a Raspberry Pi or Linux, run `hostname -I`; on Windows, run `ipconfig` and look for "IPv4 Address"; on a Mac, System Settings > Wi-Fi > Details.
@@ -177,6 +177,8 @@ On a Raspberry Pi with a small SD card, lower both, for example `-max-upload-mb 
 ## Voice and video calls
 
 People can talk in a domain's **Voice Relays** (Join, Leave, Mute, push to talk, Camera, Share screen) and call each other in **Confessions** and **Conclaves** (Call or Video call; the others hear a ringing sound and see Answer and Decline).
+
+**Settings > Keyboard shortcuts** sets a key for Toggle mute and for Push to talk on each device (they work while the app's window is in front). In the desktop app, Toggle mute can also work while the app is in the background; push to talk cannot, because the system does not tell an app when a background shortcut is let go. Click someone's shared screen or camera to open it large, then zoom with the mouse wheel, a pinch, or the + and - buttons, double-click for 100%, and drag to move around.
 
 Calls are end-to-end encrypted. Every sound and picture is encrypted on the speaker's device with a key that comes from the chat's MLS group, the same encryption messages use. The node passes the encrypted media on to the others in the call; it cannot hear or see it.
 
